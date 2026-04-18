@@ -5,6 +5,7 @@ const TRACK_TYPES = {
     hihat:  { label:'Hi-Hat', color:'#f59f00', melodic:false },
     bass:   { label:'Bass',   color:'#7950f2', melodic:true  },
     melody: { label:'Melody', color:'#4c6ef5', melodic:true  },
+    pad:    { label:'Pad',    color:'#20c997', melodic:true  },
     sample: { label:'Sample', color:'#0ea5e9', melodic:false },
 };
 
@@ -30,6 +31,27 @@ const BASS_PRESETS = {
     growl:  { osc:'sawtooth', env:{attack:.01, decay:.2,  sustain:.6, release:.2}, fe:{base:150,oct:5,  atk:.01, dec:.15, sus:.4, rel:.2},  vol:-12, dist:true },
 };
 
+// Pad synth presets (long attack, slow release)
+const PAD_PRESETS = {
+    warm:    { osc:{type:'amsine2'},                         env:{attack:.8,  decay:.5, sustain:.8, release:2.5}, vol:-12 },
+    lush:    { osc:{type:'fatsawtooth',count:3,spread:25},   env:{attack:1.2, decay:.4, sustain:.8, release:3.0}, vol:-15 },
+    dark:    { osc:{type:'fattriangle',count:2,spread:10},   env:{attack:1.5, decay:.3, sustain:.9, release:4.0}, vol:-11 },
+    aether:  { osc:{type:'fmsine'},                          env:{attack:2.0, decay:.5, sustain:.7, release:5.0}, vol:-13 },
+    strings: { osc:{type:'fatsawtooth',count:4,spread:18},   env:{attack:.6,  decay:.2, sustain:.9, release:2.0}, vol:-15 },
+    glass:   { osc:{type:'fmsine'},                          env:{attack:.01, decay:2.5,sustain:0,  release:3.0}, vol:-14 },
+    choir:   { osc:{type:'amsine3'},                         env:{attack:1.0, decay:.4, sustain:.85,release:3.5}, vol:-14 },
+};
+
+// Hi-hat presets (NoiseSynth + internal highpass filter)
+const HIHAT_PRESETS = {
+    closed:  { noise:'white', hpFreq:8000,  env:{attack:.001,decay:.08, sustain:0,   release:.02},  vol:-12 },
+    open:    { noise:'white', hpFreq:6000,  env:{attack:.001,decay:.38, sustain:.08, release:.22},  vol:-14 },
+    pedal:   { noise:'pink',  hpFreq:10000, env:{attack:.001,decay:.04, sustain:0,   release:.01},  vol:-10 },
+    crispy:  { noise:'white', hpFreq:12000, env:{attack:.001,decay:.05, sustain:0,   release:.01},  vol:-11 },
+    vinyl:   { noise:'pink',  hpFreq:5000,  env:{attack:.001,decay:.14, sustain:0,   release:.05},  vol:-13 },
+    brushed: { noise:'pink',  hpFreq:3000,  env:{attack:.005,decay:.22, sustain:.05, release:.14},  vol:-13 },
+};
+
 // MIDI drum note pools per type
 const DRUM_NOTES = { kick:[36,35,41,45], snare:[38,40,37,39], hihat:[42,44,46,51] };
 
@@ -43,12 +65,16 @@ function makeTrack(type, overrides={}) {
     return Object.assign({
         uid, type, label, color:def.color, melodic:def.melodic,
         steps: Array(32).fill(def.melodic ? null : 0),
-        vels: Array(32).fill(100),
+        vels:  Array(32).fill(100),
         probs: Array(32).fill(100),
-        mute:false, sidechain:false, kickType:'classic', bassType:'saw',
+        gates: Array(32).fill(80),
+        mute:false, sidechain:false, kickType:'classic', bassType:'saw', hihatType:'closed',
+        padPreset:'warm', padMode:'chord',
         volume:0, pan:0,
         synth:null, extra:null, howl:null, filename:null,
-        fx:{ rev: type==='melody'?.3:0, dly:0, flt:20000, dist:0 }, fxNodes:null,
+        fx:{ rev: (type==='melody'||type==='pad')?.3:0, dly:0, flt:20000, dist:0 }, fxNodes:null,
         lfo:{ enabled:false, target:'filter', rate:2, depth:0.3 }, lfoNode:null,
+        // Piano roll
+        pianoRoll: [], editMode: 'steps', pianoRollBars: 4, part: null,
     }, overrides);
 }

@@ -1,8 +1,28 @@
 // ── Audio init ─────────────────────────────────────────────
+function buildMasterBus() {
+    try { masterComp?.dispose(); masterLimiter?.dispose(); masterMeter?.dispose(); } catch(e) {}
+    masterMeter   = new Tone.Meter({ smoothing:0.85 });
+    vizFft        = new Tone.Analyser('fft', 1024);
+    vizWave       = new Tone.Analyser('waveform', 1024);
+    masterLimiter = new Tone.Limiter(MASTER.limThreshold).toDestination();
+    masterLimiter.connect(masterMeter);
+    masterLimiter.connect(vizFft);
+    masterLimiter.connect(vizWave);
+    masterComp    = new Tone.Compressor({
+        threshold: MASTER.threshold, ratio: MASTER.ratio,
+        attack: MASTER.attack, release: MASTER.release, knee: MASTER.knee,
+    }).connect(masterLimiter);
+    if (!MASTER.compEnabled) { masterComp.ratio.value = 1; masterComp.threshold.value = 0; }
+}
+
+function getMasterInput() { return masterComp ?? Tone.getDestination(); }
+
 async function startAudio() {
     if (S.audioReady) return;
     await Tone.start();
     S.audioReady = true;
+    buildMasterBus();
+    if (typeof startMasterAnimation === 'function') startMasterAnimation();
     buildChordSynth(getPreset());
     buildAllSynths();
     setStatus('Audio klaar','ok');
@@ -43,6 +63,15 @@ const CHORD_PRESETS = {
     synth_bass: { osc:{type:'sawtooth'},                       env:{attack:.02,decay:.3, sustain:.5, release:.4},  vol:-10, detune:0, filter:1200 },
     stab:       { osc:{type:'fatsawtooth', count:3, spread:20},env:{attack:.005,decay:.1,sustain:0,  release:.15}, vol:-16, detune:10  },
     reese:      { osc:{type:'fatsawtooth', count:3, spread:30},env:{attack:.01,decay:.4, sustain:.75,release:.5},  vol:-15, detune:25, filter:800 },
+    // Synthwave / Retrowave
+    retro_lead:   { osc:{type:'fatsawtooth',count:3,spread:15},  env:{attack:.01, decay:.2, sustain:.7, release:.6},  vol:-14, detune:12  },
+    neon_pad:     { osc:{type:'fatsawtooth',count:4,spread:35},  env:{attack:.8,  decay:.4, sustain:.8, release:3.0}, vol:-16, detune:30  },
+    power_stab:   { osc:{type:'fatsquare', count:3, spread:20},  env:{attack:.005,decay:.15,sustain:.4, release:.2},  vol:-15, detune:8   },
+    arp_pluck:    { osc:{type:'triangle'},                        env:{attack:.005,decay:.18,sustain:.1, release:.25}, vol:-11, detune:0   },
+    retro_bass:   { osc:{type:'sawtooth'},                        env:{attack:.01, decay:.25,sustain:.6, release:.4},  vol:-8,  detune:0, filter:1400 },
+    synth_brass:  { osc:{type:'fatsquare',count:3,spread:18},    env:{attack:.04, decay:.15,sustain:.65,release:.5},  vol:-13, detune:5   },
+    vhs_pad:      { osc:{type:'amsine2'},                         env:{attack:1.2, decay:.6, sustain:.75,release:4.0}, vol:-14, detune:22  },
+    outrun_lead:  { osc:{type:'fmsawtooth'},                      env:{attack:.01, decay:.3, sustain:.55,release:.7},  vol:-13, detune:0   },
     // World / Special
     flute:      { osc:{type:'fmtriangle'},                     env:{attack:.1, decay:.2, sustain:.8, release:.5},  vol:-13, detune:0   },
     brass:      { osc:{type:'fatsquare', count:2, spread:12},  env:{attack:.08,decay:.2, sustain:.7, release:.4},  vol:-14, detune:0   },
@@ -54,10 +83,11 @@ const CHORD_PRESETS = {
 function getPreset() { return V('chordPreset') ?? 'warm_pad'; }
 
 function buildChordSynth(presetKey) {
-    [chordSynth,chordChorus,chordDelay,chordReverb,chordFilter].forEach(n=>{try{n?.dispose();}catch(e){}});
+    [chordSynth,chordChorus,chordDelay,chordReverb,chordFilter,chordVol,chordDist].forEach(n=>{try{n?.dispose();}catch(e){}});
 
     const p   = CHORD_PRESETS[presetKey] ?? CHORD_PRESETS.warm_pad;
     const atk = +V('attack'), rel = +V('release');
+    const dec = +V('decay'),  sus = +V('sustain');
     const det = +V('detune');
 
     // Build oscillator config — apply user detune on top of preset spread
@@ -67,16 +97,18 @@ function buildChordSynth(presetKey) {
 
     const synthCfg = {
         oscillator: oscCfg,
-        envelope:   { attack:atk, decay:p.env.decay, sustain:p.env.sustain, release:rel },
+        envelope:   { attack:atk, decay:dec, sustain:sus, release:rel },
         volume:     p.vol,
     };
 
-    // Effects chain: synth → chorus → delay → reverb → filter → out
-    chordFilter = new Tone.Filter(p.filter ?? +V('filter'), 'lowpass').toDestination();
-    chordReverb = new Tone.Reverb({decay:4, wet:+V('reverb')}).connect(chordFilter);
+    // Effects chain: synth → dist → chorus → delay → reverb → filter → vol → out
+    chordVol    = new Tone.Volume(+V('chordVolume')).connect(getMasterInput());
+    chordFilter = new Tone.Filter(p.filter ?? +V('filter'), 'lowpass').connect(chordVol);
+    chordReverb = new Tone.Reverb({decay:+V('reverbDecay'), wet:+V('reverb')}).connect(chordFilter);
     chordDelay  = new Tone.FeedbackDelay('8n.', +V('delay')).connect(chordReverb);
     chordChorus = new Tone.Chorus(3.5, 1.5, +V('chorus')).connect(chordDelay).start();
-    chordSynth  = new Tone.PolySynth(Tone.Synth, synthCfg).connect(chordChorus);
+    chordDist   = new Tone.Distortion(+V('distortion')).connect(chordChorus);
+    chordSynth  = new Tone.PolySynth(Tone.Synth, synthCfg).connect(chordDist);
 
     // Sync filter slider if preset has its own value
     if (p.filter) {
@@ -94,9 +126,13 @@ function buildTrackFxChain(track) {
     if (track.fxNodes) {
         ['pan','vol','rev','dly','flt','dist'].forEach(k=>{try{track.fxNodes[k]?.dispose();}catch(e){}});
     }
+    try { track.meterNode?.dispose(); } catch(e) {}
     const fx = track.fx;
-    const pan  = new Tone.Panner(track.pan ?? 0).toDestination();
+    const pan  = new Tone.Panner(track.pan ?? 0).connect(getMasterInput());
     const vol  = new Tone.Volume(track.volume ?? 0).connect(pan);
+    const meter = new Tone.Meter({ smoothing: 0.85 });
+    vol.connect(meter);
+    track.meterNode = meter;
     const rev  = new Tone.Reverb({ decay:3, wet: fx.rev }).connect(vol);
     const dly  = new Tone.FeedbackDelay('8n', 0.4).connect(rev);
     dly.wet.value = fx.dly;
@@ -172,7 +208,9 @@ function buildTrackSynth(track) {
     } else if (track.type === 'snare') {
         track.synth = new Tone.NoiseSynth({noise:{type:'white'},envelope:{attack:.001,decay:.14,sustain:0,release:.06},volume:-8}).connect(inp);
     } else if (track.type === 'hihat') {
-        track.synth = new Tone.MetalSynth({frequency:400,harmonicity:5.1,modulationIndex:32,resonance:4000,octaves:1.5,envelope:{attack:.001,decay:.06,release:.02},volume:-10}).connect(inp);
+        const hp = HIHAT_PRESETS[track.hihatType ?? 'closed'] ?? HIHAT_PRESETS.closed;
+        track.extra = new Tone.Filter(hp.hpFreq, 'highpass').connect(inp);
+        track.synth = new Tone.NoiseSynth({noise:{type:hp.noise},envelope:hp.env,volume:hp.vol}).connect(track.extra);
     } else if (track.type === 'bass') {
         const bp = BASS_PRESETS[track.bassType ?? 'saw'] ?? BASS_PRESETS.saw;
         if (bp.osc === 'fm') {
@@ -189,6 +227,13 @@ function buildTrackSynth(track) {
         track.synth = new Tone.PolySynth(Tone.Synth, {
             oscillator: p.osc,
             envelope:   { ...p.env, attack: Math.min(p.env.attack, 0.05) },
+            volume:     p.vol,
+        }).connect(inp);
+    } else if (track.type === 'pad') {
+        const p = PAD_PRESETS[track.padPreset ?? 'warm'] ?? PAD_PRESETS.warm;
+        track.synth = new Tone.PolySynth(Tone.Synth, {
+            oscillator: p.osc,
+            envelope:   p.env,
             volume:     p.vol,
         }).connect(inp);
     }
@@ -236,4 +281,5 @@ function triggerTrack(track, time, vel=100) {
     else if (track.type==='snare') track.synth?.triggerAttackRelease('8n',time,v);
     else if (track.type==='hihat') track.synth?.triggerAttackRelease('16n',time,v);
     else if (track.type==='sample' && track.howl) { track.howl.volume(20*Math.log10(v)); track.howl.play(); }
+    // pad trigger is handled inline in buildSeqLoop (needs note value)
 }

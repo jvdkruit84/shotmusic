@@ -17,6 +17,17 @@ function setActiveChord(idx) {
 }
 
 // ── Piano keyboard ──────────────────────────────────────────
+// Keyboard → semitone offset from C (standard DAW layout, no ; to avoid Dutch keyboard issues)
+const KB_OFFSETS = {'a':0,'w':1,'s':2,'e':3,'d':4,'f':5,'t':6,'g':7,'y':8,'h':9,'u':10,'j':11,'k':12,'o':13,'l':14,'p':15};
+const KB_DISPLAY = {'a':'A','w':'W','s':'S','e':'E','d':'D','f':'F','t':'T','g':'G','y':'Y','h':'H','u':'U','j':'J','k':'K','o':'O','l':'L','p':'P'};
+
+let kbdOctave = 4;   // adjustable with Z/X
+let kbdActive  = false;
+
+// Piano uses MIDI where C4=48 in this app's convention (octave*12)
+// buildPiano(36,96): 36=C3, 48=C4, 60=C5, etc. (octave offset = octave*12)
+function kbdBaseC() { return kbdOctave * 12; }
+
 function buildPiano(lo=36,hi=96) {
     const piano=document.getElementById('piano'); piano.innerHTML=''; const wW=28;
     const keys=[]; let whites=0;
@@ -25,27 +36,42 @@ function buildPiano(lo=36,hi=96) {
     keys.forEach(({m,isB})=>{
         const k=document.createElement('div'); k.className='key '+(isB?'black':'white'); k.dataset.midi=m;
         if(isB){const wb=Array.from({length:m-lo},(_,i)=>i+lo).filter(x=>![1,3,6,8,10].includes(x%12)).length;k.style.left=(wb*wW+wW*.62)+'px';}
-        let holdTimer = null;
-        k.addEventListener('mousedown', async e => {
-            e.preventDefault();
-            await startAudio();
+        // Keyboard label span
+        const lbl=document.createElement('span'); lbl.className='key-kb-label'; k.appendChild(lbl);
+        let holdTimer=null;
+        k.addEventListener('mousedown',async e=>{
+            e.preventDefault(); await startAudio();
             k.classList.add('lit-playing');
-            if(!S.chordMute) chordSynth?.triggerAttack(midiFreq(m), Tone.now());
-            // Safety release after 4s in case mouseup is missed
-            holdTimer = setTimeout(() => {
-                if(!S.chordMute) chordSynth?.triggerRelease(midiFreq(m));
-                k.classList.remove('lit-playing');
-            }, 4000);
+            if(!S.chordMute) chordSynth?.triggerAttack(midiFreq(m),Tone.now());
+            holdTimer=setTimeout(()=>{ if(!S.chordMute)chordSynth?.triggerRelease(midiFreq(m)); k.classList.remove('lit-playing'); },4000);
         });
-        const release = () => {
-            clearTimeout(holdTimer);
-            if(!S.chordMute) chordSynth?.triggerRelease(midiFreq(m));
-            k.classList.remove('lit-playing');
-        };
-        k.addEventListener('mouseup',    release);
-        k.addEventListener('mouseleave', release);
+        const release=()=>{ clearTimeout(holdTimer); if(!S.chordMute)chordSynth?.triggerRelease(midiFreq(m)); k.classList.remove('lit-playing'); };
+        k.addEventListener('mouseup',release); k.addEventListener('mouseleave',release);
         piano.appendChild(k);
     });
+    updateKbdLabels();
+}
+
+function updateKbdLabels() {
+    const base=kbdBaseC();
+    // Clear all labels first
+    document.querySelectorAll('.key-kb-label').forEach(l=>l.textContent='');
+    // Set label for each mapped key
+    Object.entries(KB_OFFSETS).forEach(([key,offset])=>{
+        const midi=base+offset;
+        const el=document.querySelector(`.piano .key[data-midi="${midi}"] .key-kb-label`);
+        if(el) el.textContent=KB_DISPLAY[key];
+    });
+    // Update octave indicator
+    const ind=document.getElementById('kbdOctaveInd');
+    if(ind) ind.textContent='C'+kbdOctave;
+}
+
+function scrollPianoToKbd() {
+    const base=kbdBaseC();
+    const el=document.querySelector(`.piano .key[data-midi="${base}"]`);
+    const wrap=document.querySelector('.piano-wrap');
+    if(el&&wrap) wrap.scrollLeft=Math.max(0, el.offsetLeft - wrap.clientWidth/3);
 }
 function highlightPiano() {
     document.querySelectorAll('.piano .key').forEach(k=>{k.classList.remove('lit-scale','lit-chord');if(S.scale.includes(+k.dataset.midi))k.classList.add('lit-scale');});
@@ -133,8 +159,26 @@ function buildSeqGrid() {
         handle.addEventListener('mousedown', ()=>{ row.draggable=true; });
         hdr.addEventListener('mousedown', e=>{ if(e.target!==handle) row.draggable=false; });
 
-        // Instrument type selector
-        const typeSel=document.createElement('select'); typeSel.className='seq-type-select'; typeSel.style.color=track.color;
+        // Track name — klik om te hernoemen
+        const nameLbl=document.createElement('div'); nameLbl.className='seq-track-name';
+        nameLbl.textContent=track.label; nameLbl.style.color=track.color;
+        nameLbl.title='Klik om naam te wijzigen';
+        nameLbl.addEventListener('click',()=>{
+            const inp=document.createElement('input'); inp.type='text'; inp.className='seq-track-name-input';
+            inp.value=track.label; inp.style.color=track.color;
+            nameLbl.replaceWith(inp); inp.focus(); inp.select();
+            const commit=()=>{
+                const v=inp.value.trim()||track.label;
+                track.label=v; nameLbl.textContent=v;
+                inp.replaceWith(nameLbl); autoSave();
+            };
+            inp.addEventListener('blur', commit);
+            inp.addEventListener('keydown', e=>{ if(e.key==='Enter') inp.blur(); if(e.key==='Escape'){ inp.value=track.label; inp.blur(); } });
+        });
+        hdr.appendChild(nameLbl);
+
+        // Type selector (klein, in knoppen-rij)
+        const typeSel=document.createElement('select'); typeSel.className='seq-type-select';
         Object.entries(TRACK_TYPES).forEach(([k,v])=>{
             const o=document.createElement('option'); o.value=k; o.textContent=v.label;
             if(k===track.type) o.selected=true;
@@ -151,7 +195,17 @@ function buildSeqGrid() {
         scBtn.addEventListener('click',()=>{ track.sidechain=!track.sidechain; scBtn.classList.toggle('active',track.sidechain); autoSave(); });
         const rem=document.createElement('button'); rem.className='seq-remove-btn'; rem.title='Verwijder'; rem.textContent='×';
         rem.addEventListener('click',()=>removeTrack(track.uid));
-        row1.append(handle,typeSel,mute,fxBtn,eucBtn,scBtn,rem); hdr.appendChild(row1);
+        if(track.melodic){
+            const prBtn=document.createElement('button');
+            prBtn.className='seq-pr-btn'+(track.editMode==='pianoroll'?' active':'');
+            prBtn.textContent='PR'; prBtn.title='Piano Roll editor';
+            prBtn.dataset.uid=track.uid;
+            prBtn.addEventListener('click',()=>{ if(typeof openPianoRoll==='function') openPianoRoll(track); });
+            row1.append(handle,typeSel,mute,fxBtn,eucBtn,scBtn,prBtn,rem);
+        } else {
+            row1.append(handle,typeSel,mute,fxBtn,eucBtn,scBtn,rem);
+        }
+        hdr.appendChild(row1);
 
         // Kick type selector
         if(track.type==='kick'){
@@ -166,6 +220,21 @@ function buildSeqGrid() {
                 setStatus('Kick: '+this.value,'ok');
             });
             hdr.appendChild(kt);
+        }
+
+        // Hi-hat type selector
+        if(track.type==='hihat'){
+            const ht=document.createElement('select'); ht.className='seq-kick-type';
+            ['closed','open','pedal','crispy','vinyl','brushed'].forEach(t=>{
+                const o=document.createElement('option'); o.value=t; o.textContent=t.charAt(0).toUpperCase()+t.slice(1);
+                if(t===track.hihatType)o.selected=true; ht.appendChild(o);
+            });
+            ht.addEventListener('change',function(){
+                track.hihatType=this.value;
+                if(S.audioReady) buildTrackSynth(track);
+                setStatus('Hi-hat: '+this.value,'ok');
+            });
+            hdr.appendChild(ht);
         }
 
         // Sample drop zone
@@ -184,6 +253,31 @@ function buildSeqGrid() {
                 const f=e.dataTransfer.files[0]; if(f) loadSampleFile(track,f);
             });
             hdr.appendChild(dz); hdr.appendChild(fi);
+        }
+
+        // Pad preset + mode selector
+        if(track.type==='pad'){
+            const pp=document.createElement('select'); pp.className='seq-bass-type';
+            [{v:'warm',l:'Warm'},{v:'lush',l:'Lush'},{v:'dark',l:'Dark'},{v:'aether',l:'Aether'},{v:'strings',l:'Strings'},{v:'glass',l:'Glass'},{v:'choir',l:'Choir'}].forEach(({v,l})=>{
+                const o=document.createElement('option'); o.value=v; o.textContent=l;
+                if(v===track.padPreset)o.selected=true; pp.appendChild(o);
+            });
+            pp.addEventListener('change',function(){
+                track.padPreset=this.value;
+                if(S.audioReady) buildTrackSynth(track);
+                setStatus('Pad: '+this.value,'ok'); autoSave();
+            });
+            hdr.appendChild(pp);
+
+            const pm=document.createElement('select'); pm.className='seq-bass-type';
+            [{v:'chord',l:'Akkoord'},{v:'note',l:'Noot'}].forEach(({v,l})=>{
+                const o=document.createElement('option'); o.value=v; o.textContent=l;
+                if(v===track.padMode)o.selected=true; pm.appendChild(o);
+            });
+            pm.addEventListener('change',function(){
+                track.padMode=this.value; setStatus('Pad mode: '+this.value,'ok'); autoSave();
+            });
+            hdr.appendChild(pm);
         }
 
         // Bass type selector
@@ -327,6 +421,8 @@ function buildSeqGrid() {
     addBtn.addEventListener('click',()=>addTrack(addSel.value));
     addRow.append(addSel,addBtn);
     grid.appendChild(addRow);
+    if(typeof refreshKbdRecTrack==='function') refreshKbdRecTrack();
+    if(typeof refreshMixerIfOpen==='function') refreshMixerIfOpen();
 }
 
 function makeStepBtn(track, idx) {
@@ -362,7 +458,7 @@ function showStepOptsPopup(track, idx, anchor) {
     const popup = document.createElement('div'); popup.className='step-opts-popup'; stepOptsPopupEl=popup;
     const rect = anchor.getBoundingClientRect();
     popup.style.left = Math.min(rect.left, window.innerWidth-160)+'px';
-    popup.style.top  = Math.max(4, rect.top - 105)+'px';
+    popup.style.top  = Math.max(4, rect.top - 138)+'px';
 
     const title = document.createElement('div'); title.className='pop-title'; title.textContent=`Stap ${idx+1}`;
     popup.appendChild(title);
@@ -374,7 +470,7 @@ function showStepOptsPopup(track, idx, anchor) {
     velSl.style.accentColor='var(--accent)';
     const velVal=document.createElement('span'); velVal.className='pop-val'; velVal.textContent=track.vels[idx]??100;
     velSl.addEventListener('input',()=>{ const v=+velSl.value; velVal.textContent=v; track.vels[idx]=v; refreshStepBtn(track,idx); });
-    velSl.addEventListener('change',autoSave);
+    velSl.addEventListener('change',()=>{ pushHistory(); autoSave(); });
     velRow.append(velLbl,velSl,velVal);
 
     // Probability row
@@ -384,10 +480,23 @@ function showStepOptsPopup(track, idx, anchor) {
     probSl.style.accentColor='var(--green)';
     const probVal=document.createElement('span'); probVal.className='pop-val'; probVal.textContent=(track.probs[idx]??100)+'%';
     probSl.addEventListener('input',()=>{ const v=+probSl.value; probVal.textContent=v+'%'; track.probs[idx]=v; refreshStepBtn(track,idx); });
-    probSl.addEventListener('change',autoSave);
+    probSl.addEventListener('change',()=>{ pushHistory(); autoSave(); });
     probRow.append(probLbl,probSl,probVal);
 
-    popup.append(velRow, probRow);
+    // Gate row (melodic tracks only)
+    if(track.melodic) {
+        const gateRow=document.createElement('div'); gateRow.className='step-opts-row';
+        const gateLbl=document.createElement('label'); gateLbl.textContent='GATE';
+        const gateSl=document.createElement('input'); gateSl.type='range'; gateSl.min=5; gateSl.max=100; gateSl.step=5; gateSl.value=track.gates?.[idx]??80;
+        gateSl.style.accentColor='var(--accent2)';
+        const gateVal=document.createElement('span'); gateVal.className='pop-val'; gateVal.textContent=(track.gates?.[idx]??80)+'%';
+        gateSl.addEventListener('input',()=>{ const v=+gateSl.value; gateVal.textContent=v+'%'; if(!track.gates) track.gates=Array(32).fill(80); track.gates[idx]=v; });
+        gateSl.addEventListener('change',()=>{ pushHistory(); autoSave(); });
+        gateRow.append(gateLbl,gateSl,gateVal);
+        popup.append(velRow, probRow, gateRow);
+    } else {
+        popup.append(velRow, probRow);
+    }
     document.body.appendChild(popup);
     setTimeout(()=>document.addEventListener('click',closeStepOptsPopup,{once:true}),10);
 }
@@ -409,6 +518,7 @@ function refreshStepBtn(track, idx) {
 }
 
 function toggleStep(track,idx) {
+    pushHistory();
     if(track.melodic) track.steps[idx]=track.steps[idx]===null?getMelNote(track.type):null;
     else              track.steps[idx]=track.steps[idx]?0:1;
     refreshStepBtn(track,idx);
@@ -416,9 +526,11 @@ function toggleStep(track,idx) {
 }
 function cycleNote(track,idx) {
     const notes=getScaleNotes(track.type); if(!notes.length) return;
+    pushHistory();
     const cur=track.steps[idx]; const ci=cur===null?-1:notes.indexOf(cur);
     track.steps[idx]=notes[(ci+1)%notes.length];
     refreshStepBtn(track,idx);
+    autoSave();
 }
 function getMelNote(type)   { const n=getScaleNotes(type); return n[0]??(type==='bass'?33:57); }
 function getScaleNotes(type){ const [lo,hi]=type==='bass'?[24,47]:[48,71]; return S.scale.filter(n=>n>=lo&&n<=hi).sort((a,b)=>a-b); }

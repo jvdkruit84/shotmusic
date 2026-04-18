@@ -27,7 +27,8 @@ switch ($action) {
         echo json_encode([
             'progressive_house', 'melodic_techno', 'deep_house',
             'organic_house', 'downtempo', 'trance', 'drum_and_bass',
-            'minimal_dub_techno', 'peak_time_techno'
+            'minimal_dub_techno', 'peak_time_techno',
+            'synthwave', 'darksynth', 'outrun'
         ]);
         break;
 

@@ -25,7 +25,7 @@ function saveCurrentPattern() {
     const p = SEQ.patterns[SEQ.currentPattern];
     p.data = {};
     SEQ.tracks.forEach(t => {
-        p.data[t.uid] = { steps:[...t.steps], vels:[...t.vels], probs:[...t.probs] };
+        p.data[t.uid] = { steps:[...t.steps], vels:[...t.vels], probs:[...t.probs], gates:[...(t.gates??Array(32).fill(80))] };
     });
 }
 
@@ -38,11 +38,13 @@ function loadPatternData(name) {
             t.steps = [...d.steps];
             t.vels  = [...d.vels];
             t.probs = [...d.probs];
+            t.gates = [...(d.gates??Array(32).fill(80))];
         } else {
             const def = TRACK_TYPES[t.type];
             t.steps = Array(32).fill(def.melodic?null:0);
             t.vels  = Array(32).fill(100);
             t.probs = Array(32).fill(100);
+            t.gates = Array(32).fill(80);
         }
     });
 }
@@ -116,15 +118,31 @@ function buildSeqLoop() {
         }
         SEQ.tracks.forEach(track=>{
             if(track.mute) return;
+            // Piano roll tracks play via their own Tone.Part — skip in sequence
+            if(track.editMode === 'pianoroll') return;
             const prob=track.probs[step]??100;
             if(prob<100 && Math.random()*100>prob) return;
             const val=track.steps[step];
             const vel=track.vels[step]??100;
             const v=Math.max(0.01,Math.min(1,vel/127));
+            const gate=track.gates?.[step]??80;
+            const stepSec=Tone.Time('16n').toSeconds();
+            const gateDur=Math.max(0.01, stepSec * gate / 100);
             if(!track.melodic){ if(val) triggerTrack(track,time,vel); }
-            else { if(val!==null) track.synth?.triggerAttackRelease(midiFreq(val),'16n',time,v); }
+            else if(track.type==='pad') {
+                if(val!==null) {
+                    const dur = track.padMode==='chord'
+                        ? Tone.Time('1n').toSeconds() * (+document.getElementById('chordBars').value||2)
+                        : gateDur;
+                    const notes = track.padMode==='chord' && S.progression[S.currentChord]?.length
+                        ? S.progression[S.currentChord].map(midiFreq)
+                        : [midiFreq(val)];
+                    track.synth?.triggerAttackRelease(notes, dur, time, v);
+                }
+            }
+            else { if(val!==null) track.synth?.triggerAttackRelease(midiFreq(val),gateDur,time,v); }
         });
-        Tone.Draw.schedule(()=>updateSeqHighlight(step),time);
+        Tone.Draw.schedule(()=>{ S.currentSeqStep=step; updateSeqHighlight(step); },time);
     },Array.from({length:steps},(_,i)=>i),'16n');
     seqLoop.start(0);
 }
@@ -143,6 +161,9 @@ function startPlayback() {
         Tone.getTransport().swing=+V('seqSwing');
         Tone.getTransport().swingSubdivision='16n';
         buildChordPart(); buildSeqLoop();
+        // Start piano roll parts for tracks in pianoroll mode
+        SEQ.tracks.forEach(t => { if(t.editMode==='pianoroll') buildPianoRollPart(t); });
+        if (ARP.enabled) buildArpLoop();
         Tone.getTransport().start();
         setStatus('Speelt…','ok');
     });
@@ -151,6 +172,9 @@ function stopPlayback() {
     Tone.getTransport().stop(); Tone.getTransport().cancel();
     chordPart?.dispose(); chordPart=null;
     seqLoop?.dispose(); seqLoop=null;
+    // Stop piano roll parts
+    SEQ.tracks.forEach(t => { try{ t.part?.dispose(); }catch(e){} t.part=null; });
+    stopArpLoop();
     S.isPlaying=false; setLed('off'); chordSynth?.releaseAll();
     document.querySelectorAll('.chord-card').forEach(c=>c.classList.remove('playing'));
     updateSeqHighlight(-1); setStatus('Gestopt');

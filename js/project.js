@@ -16,22 +16,30 @@ function collectProjectData() {
         bpm:            +V('bpm'),
         steps:          SEQ.steps,
         swing:          +V('seqSwing'),
-        keySelect:      V('keySelect'),
-        genreSelect:    V('genreSelect'),
-        progressionSelect: V('progressionSelect'),
+        rootNote:       V('rootNote'),
+        keyMode:        V('keyMode'),
+        genreSelect:    V('genre'),
+        progressionSelect: V('progression'),
         chordBars:      +V('chordBars'),
         voiceLead:      document.getElementById('voiceLead')?.checked ?? false,
         pianoSound:     V('pianoSound'),
         chordPreset:    V('chordPreset'),
         attack:         +V('attack'),
+        decay:          +V('decay'),
+        sustain:        +V('sustain'),
         release:        +V('release'),
         detune:         +V('detune'),
         chorus:         +V('chorus'),
         reverb:         +V('reverb'),
+        reverbDecay:    +V('reverbDecay'),
         delay:          +V('delay'),
+        distortion:     +V('distortion'),
         filter:         +V('filter'),
+        chordVolume:    +V('chordVolume'),
         chordMute:      S.chordMute,
         sidechain:      {...S.sidechain},
+        arp:            {...ARP},
+        master:         {...MASTER},
         patterns:       JSON.parse(JSON.stringify(SEQ.patterns)),
         currentPattern: SEQ.currentPattern,
         songArrangement:SEQ.songArrangement,
@@ -45,16 +53,24 @@ function collectProjectData() {
             type:     t.type,
             label:    t.label,
             mute:     t.mute,
-            kickType: t.kickType,
-            bassType: t.bassType,
+            kickType:  t.kickType,
+            hihatType: t.hihatType,
+            bassType:  t.bassType,
+            padPreset: t.padPreset,
+            padMode:   t.padMode,
             volume:   t.volume,
             pan:      t.pan,
             fx:       {...t.fx},
             steps:    [...t.steps],
             vels:     [...t.vels],
             probs:    [...t.probs],
+            gates:    [...(t.gates??Array(32).fill(80))],
             lfo:      {...t.lfo},
+            sidechain: t.sidechain ?? false,
             filename: t.filename ?? null,
+            editMode:   t.editMode ?? 'steps',
+            pianoRoll:  t.pianoRoll ?? [],
+            pianoRollBars: t.pianoRollBars ?? 4,
         })),
     };
 }
@@ -71,8 +87,8 @@ function saveProjectFile() {
     setStatus('Project opgeslagen','ok');
 }
 
-async function loadProjectData(data) {
-    if(!data||data.version<2) { setStatus('Ongeldig of oud projectbestand','err'); return; }
+async function loadProjectData(data, opts={}) {
+    if(!data||data.version<2) { if(!opts.silent) setStatus('Ongeldig of oud projectbestand','err'); return; }
     // Stop playback first
     if(S.isPlaying) stopPlayback();
 
@@ -81,19 +97,49 @@ async function loadProjectData(data) {
     set('bpm', data.bpm);
     set('seqSwing', data.swing);
     set('chordBars', data.chordBars);
-    set('keySelect', data.keySelect);
-    set('genreSelect', data.genreSelect);
-    set('progressionSelect', data.progressionSelect);
+    // Restore root note buttons
+    if(data.rootNote) {
+        document.getElementById('rootNote').value = data.rootNote;
+        document.querySelectorAll('.root-btn').forEach(b=>{
+            b.classList.toggle('active', b.dataset.note === data.rootNote);
+        });
+    }
+    // Restore mode buttons
+    if(data.keyMode) {
+        document.getElementById('keyMode').value = data.keyMode;
+        document.getElementById('modeBtnMinor')?.classList.toggle('active', data.keyMode==='minor');
+        document.getElementById('modeBtnMajor')?.classList.toggle('active', data.keyMode==='major');
+    }
+    if(typeof updateKeyInfo === 'function') updateKeyInfo();
+    set('genre', data.genreSelect);
+    set('progression', data.progressionSelect);
     set('pianoSound', data.pianoSound);
     set('chordPreset', data.chordPreset);
-    set('attack', data.attack); set('release', data.release); set('detune', data.detune);
+    set('attack', data.attack);   set('decay', data.decay ?? 0.5);
+    set('sustain', data.sustain ?? 0.7); set('release', data.release);
+    set('detune', data.detune);
     set('chorus', data.chorus); set('reverb', data.reverb);
-    set('delay', data.delay);   set('filter', data.filter);
+    set('reverbDecay', data.reverbDecay ?? 4);
+    set('delay', data.delay);   set('distortion', data.distortion ?? 0);
+    set('filter', data.filter);
     if(document.getElementById('voiceLead')) document.getElementById('voiceLead').checked=data.voiceLead;
 
     // Restore state
+    if(data.chordVolume !== undefined) {
+        const cv=document.getElementById('chordVolume'); if(cv){ cv.value=data.chordVolume; document.getElementById('chordVolumeVal').textContent=data.chordVolume+'dB'; }
+    }
     S.chordMute   = data.chordMute ?? false;
     if(data.sidechain) Object.assign(S.sidechain, data.sidechain);
+    if(data.master)   { Object.assign(MASTER, data.master); if(typeof restoreMasterUI==='function') restoreMasterUI(); if(S.audioReady){ applyCompSettings(); if(masterLimiter) masterLimiter.threshold.value=MASTER.limThreshold; } }
+    if(data.arp) {
+        Object.assign(ARP, data.arp);
+        const t=document.getElementById('arpToggle'); if(t) t.classList.toggle('active',ARP.enabled);
+        document.getElementById('arpControls')?.classList.toggle('hidden',!ARP.enabled);
+        const mEl=document.getElementById('arpMode'); if(mEl) mEl.value=ARP.mode;
+        const rEl=document.getElementById('arpRate'); if(rEl) rEl.value=ARP.rate;
+        const oEl=document.getElementById('arpOctaves'); if(oEl) oEl.value=ARP.octaves;
+        const gEl=document.getElementById('arpGate'); if(gEl){ gEl.value=ARP.gate; document.getElementById('arpGateVal').textContent=Math.round(ARP.gate*100)+'%'; }
+    }
     if(data.patterns)  Object.assign(SEQ.patterns, data.patterns);
     SEQ.currentPattern  = data.currentPattern ?? 'A';
     SEQ.songArrangement = data.songArrangement ?? [];
@@ -128,16 +174,25 @@ async function loadProjectData(data) {
             steps:    (td.steps??[]).concat(Array(32).fill(def.melodic?null:0)).slice(0,32),
             vels:     (td.vels??[]).concat(Array(32).fill(100)).slice(0,32),
             probs:    (td.probs??[]).concat(Array(32).fill(100)).slice(0,32),
+            gates:    (td.gates??[]).concat(Array(32).fill(80)).slice(0,32),
             lfo:      Object.assign({enabled:false,target:'filter',rate:2,depth:0.3}, td.lfo??{}),
             lfoNode:  null,
             mute:     td.mute ?? false,
-            kickType: td.kickType ?? 'classic',
-            bassType: td.bassType ?? 'saw',
+            sidechain: td.sidechain ?? false,
+            kickType:  td.kickType  ?? 'classic',
+            hihatType: td.hihatType ?? 'closed',
+            bassType:  td.bassType  ?? 'saw',
+            padPreset: td.padPreset ?? 'warm',
+            padMode:   td.padMode   ?? 'chord',
             volume:   td.volume ?? 0,
             pan:      td.pan ?? 0,
             fx:       Object.assign({rev:0,dly:0,flt:20000,dist:0}, td.fx??{}),
             fxNodes:  null,
             synth:    null, extra:null, howl:null, filename:td.filename??null,
+            editMode:   td.editMode ?? 'steps',
+            pianoRoll:  td.pianoRoll ?? [],
+            pianoRollBars: td.pianoRollBars ?? 4,
+            part:       null,
         };
         SEQ.tracks.push(t);
     });
@@ -156,7 +211,8 @@ async function loadProjectData(data) {
     buildSongBar();
     buildChordGrid();
     highlightPiano();
-    setStatus('Project geladen ✓','ok');
+    if(typeof updateAdsrDisplay === 'function') updateAdsrDisplay();
+    if(!opts.silent) setStatus('Project geladen ✓','ok');
 }
 
 
@@ -254,3 +310,10 @@ async function stopRecording() {
     setLed(S.isPlaying?'playing':'off');
     setStatus('Opname opgeslagen!','ok');
 }
+
+// ── Reset project ───────────────────────────────────────────
+document.getElementById('btnReset').addEventListener('click',function(){
+    if(!confirm('Project resetten naar standaard?\nAlle tracks, patronen en instellingen worden gewist.')) return;
+    try { localStorage.removeItem(PROJECT_KEY); } catch(e){}
+    location.reload();
+});

@@ -293,6 +293,169 @@ class MusicTheory
             ['chord' => 'bIII', 'function' => 'mediant', 'type' => 'no3'],
             ['chord' => 'VII', 'function' => 'subtonic', 'type' => 'sus2'],
             ['chord' => 'VI', 'function' => 'submediant', 'type' => 'sus4']
+        ],
+
+        // ── Synthwave / Retrowave ────────────────────────────────
+        'synthwave_classic' => [ // i–VI–III–VII (most iconic synthwave)
+            ['chord' => 'i',   'function' => 'tonic',      'type' => 'minor'],
+            ['chord' => 'VI',  'function' => 'submediant',  'type' => 'major'],
+            ['chord' => 'III', 'function' => 'mediant',     'type' => 'major'],
+            ['chord' => 'VII', 'function' => 'subtonic',    'type' => 'major']
+        ],
+        'synthwave_retrowave' => [ // i–VII–VI–V (descending retrowave)
+            ['chord' => 'i',   'function' => 'tonic',      'type' => 'minor'],
+            ['chord' => 'VII', 'function' => 'subtonic',   'type' => 'major'],
+            ['chord' => 'VI',  'function' => 'submediant', 'type' => 'major'],
+            ['chord' => 'V',   'function' => 'dominant',   'type' => 'major']
+        ],
+        'synthwave_dark' => [ // i–iv–VII–III (darker, more dramatic)
+            ['chord' => 'i',   'function' => 'tonic',      'type' => 'minor'],
+            ['chord' => 'iv',  'function' => 'subdominant','type' => 'minor'],
+            ['chord' => 'VII', 'function' => 'subtonic',   'type' => 'major'],
+            ['chord' => 'III', 'function' => 'mediant',    'type' => 'major']
+        ],
+        'synthwave_uplifting' => [ // I–V–vi–IV major (dreamwave / uplifting)
+            ['chord' => 'I',   'function' => 'tonic',      'type' => 'major'],
+            ['chord' => 'V',   'function' => 'dominant',   'type' => 'major'],
+            ['chord' => 'vi',  'function' => 'submediant', 'type' => 'minor'],
+            ['chord' => 'IV',  'function' => 'subdominant','type' => 'major']
+        ],
+        'synthwave_dreamwave' => [ // i–VI–VII–i (driving, hypnotic loop)
+            ['chord' => 'i',   'function' => 'tonic',      'type' => 'minor'],
+            ['chord' => 'VI',  'function' => 'submediant', 'type' => 'major'],
+            ['chord' => 'VII', 'function' => 'subtonic',   'type' => 'major'],
+            ['chord' => 'i',   'function' => 'tonic',      'type' => 'minor']
+        ],
+        'synthwave_power' => [ // power chords — raw, aggressive
+            ['chord' => 'i',   'function' => 'tonic',      'type' => 'power'],
+            ['chord' => 'VI',  'function' => 'submediant', 'type' => 'power'],
+            ['chord' => 'III', 'function' => 'mediant',    'type' => 'power'],
+            ['chord' => 'VII', 'function' => 'subtonic',   'type' => 'power']
+        ],
+
+        // ── Jazz & Funk ──────────────────────────────────────────
+        'ii_V_I' => [ // Classic jazz turnaround
+            ['chord' => 'ii', 'function' => 'supertonic', 'type' => 'minor7'],
+            ['chord' => 'V', 'function' => 'dominant', 'type' => 'dom7'],
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'major'],
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'major7']
+        ],
+        'I_vi_ii_V' => [ // Rhythm changes / jazz standard
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'major7'],
+            ['chord' => 'vi', 'function' => 'submediant', 'type' => 'minor7'],
+            ['chord' => 'ii', 'function' => 'supertonic', 'type' => 'minor7'],
+            ['chord' => 'V', 'function' => 'dominant', 'type' => 'dom7']
+        ],
+        'i_iim7b5_V7_i' => [ // Jazz minor turnaround
+            ['chord' => 'i', 'function' => 'tonic', 'type' => 'minor7'],
+            ['chord' => 'ii', 'function' => 'supertonic', 'type' => 'half_dim7'],
+            ['chord' => 'V', 'function' => 'dominant', 'type' => 'dom7'],
+            ['chord' => 'i', 'function' => 'tonic', 'type' => 'minor7']
+        ],
+        'I_IV_ii_V_jazz' => [ // Jazzy four-chord
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'major9'],
+            ['chord' => 'IV', 'function' => 'subdominant', 'type' => 'major7'],
+            ['chord' => 'ii', 'function' => 'supertonic', 'type' => 'minor9'],
+            ['chord' => 'V', 'function' => 'dominant', 'type' => 'dom9']
+        ],
+
+        // ── Modal ────────────────────────────────────────────────
+        'dorian_groove' => [ // Dorian i-II vibe
+            ['chord' => 'i', 'function' => 'tonic', 'type' => 'minor7'],
+            ['chord' => 'II', 'function' => 'supertonic', 'type' => 'major7'],
+            ['chord' => 'i', 'function' => 'tonic', 'type' => 'minor7'],
+            ['chord' => 'iv', 'function' => 'subdominant', 'type' => 'minor7']
+        ],
+        'phrygian_gate' => [ // Phrygian flamenco feel
+            ['chord' => 'i', 'function' => 'tonic', 'type' => 'minor'],
+            ['chord' => 'bII', 'function' => 'neapolitan', 'type' => 'major'],
+            ['chord' => 'bVII', 'function' => 'subtonic', 'type' => 'major'],
+            ['chord' => 'bVI', 'function' => 'submediant', 'type' => 'major']
+        ],
+        'lydian_float' => [ // Lydian brightness I-II
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'major7'],
+            ['chord' => 'II', 'function' => 'supertonic', 'type' => 'major'],
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'add9'],
+            ['chord' => 'vi', 'function' => 'submediant', 'type' => 'minor7']
+        ],
+        'mixolydian_roll' => [ // Mixolydian rock/folk
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'major'],
+            ['chord' => 'bVII', 'function' => 'subtonic', 'type' => 'major'],
+            ['chord' => 'IV', 'function' => 'subdominant', 'type' => 'major'],
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'major']
+        ],
+
+        // ── Cinematic / Ambient ──────────────────────────────────
+        'andalusian_cadence' => [ // Flamenco/trance descending
+            ['chord' => 'i', 'function' => 'tonic', 'type' => 'minor'],
+            ['chord' => 'VII', 'function' => 'subtonic', 'type' => 'major'],
+            ['chord' => 'VI', 'function' => 'submediant', 'type' => 'major'],
+            ['chord' => 'V', 'function' => 'dominant', 'type' => 'major']
+        ],
+        'I_iii_vi_IV' => [ // Cinematic major
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'major'],
+            ['chord' => 'iii', 'function' => 'mediant', 'type' => 'minor'],
+            ['chord' => 'vi', 'function' => 'submediant', 'type' => 'minor'],
+            ['chord' => 'IV', 'function' => 'subdominant', 'type' => 'major']
+        ],
+        'i_v_VI_III' => [ // Film score / video game feel
+            ['chord' => 'i', 'function' => 'tonic', 'type' => 'minor'],
+            ['chord' => 'v', 'function' => 'dominant', 'type' => 'minor'],
+            ['chord' => 'VI', 'function' => 'submediant', 'type' => 'major'],
+            ['chord' => 'III', 'function' => 'mediant', 'type' => 'major']
+        ],
+        'i_VI_v_IV' => [ // Cinematic minor descent
+            ['chord' => 'i', 'function' => 'tonic', 'type' => 'minor'],
+            ['chord' => 'VI', 'function' => 'submediant', 'type' => 'major'],
+            ['chord' => 'v', 'function' => 'dominant', 'type' => 'minor'],
+            ['chord' => 'IV', 'function' => 'subdominant', 'type' => 'major']
+        ],
+
+        // ── Pop / R&B ────────────────────────────────────────────
+        'I_V_vi_iii_IV' => [ // Pachelbel pop 5-chord
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'major'],
+            ['chord' => 'V', 'function' => 'dominant', 'type' => 'major'],
+            ['chord' => 'vi', 'function' => 'submediant', 'type' => 'minor'],
+            ['chord' => 'iii', 'function' => 'mediant', 'type' => 'minor'],
+            ['chord' => 'IV', 'function' => 'subdominant', 'type' => 'major']
+        ],
+        'I_iii_IV_V' => [ // Ascending major pop
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'major'],
+            ['chord' => 'iii', 'function' => 'mediant', 'type' => 'minor'],
+            ['chord' => 'IV', 'function' => 'subdominant', 'type' => 'major'],
+            ['chord' => 'V', 'function' => 'dominant', 'type' => 'major']
+        ],
+        'i_III_VII_VI' => [ // Emotional minor (Adele / deep house)
+            ['chord' => 'i', 'function' => 'tonic', 'type' => 'minor'],
+            ['chord' => 'III', 'function' => 'mediant', 'type' => 'major'],
+            ['chord' => 'VII', 'function' => 'subtonic', 'type' => 'major'],
+            ['chord' => 'VI', 'function' => 'submediant', 'type' => 'major']
+        ],
+        'I_IV_vi_V' => [ // Uplifting pop EDM
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'major'],
+            ['chord' => 'IV', 'function' => 'subdominant', 'type' => 'major'],
+            ['chord' => 'vi', 'function' => 'submediant', 'type' => 'minor'],
+            ['chord' => 'V', 'function' => 'dominant', 'type' => 'major']
+        ],
+
+        // ── Extended harmonic ────────────────────────────────────
+        'i_IV_bVII_III' => [ // Dark modal pivot
+            ['chord' => 'i', 'function' => 'tonic', 'type' => 'minor'],
+            ['chord' => 'iv', 'function' => 'subdominant', 'type' => 'minor7'],
+            ['chord' => 'bVII', 'function' => 'subtonic', 'type' => 'major7'],
+            ['chord' => 'III', 'function' => 'mediant', 'type' => 'major']
+        ],
+        'i_VI_bVII_bVI' => [ // Dreamy floating loop
+            ['chord' => 'i', 'function' => 'tonic', 'type' => 'minor'],
+            ['chord' => 'VI', 'function' => 'submediant', 'type' => 'major'],
+            ['chord' => 'bVII', 'function' => 'subtonic', 'type' => 'major'],
+            ['chord' => 'bVI', 'function' => 'submediant', 'type' => 'add9']
+        ],
+        'I_ii_iii_IV' => [ // Ascending bassline
+            ['chord' => 'I', 'function' => 'tonic', 'type' => 'major'],
+            ['chord' => 'ii', 'function' => 'supertonic', 'type' => 'minor'],
+            ['chord' => 'iii', 'function' => 'mediant', 'type' => 'minor'],
+            ['chord' => 'IV', 'function' => 'subdominant', 'type' => 'major']
         ]
     ];
 
@@ -458,7 +621,7 @@ class MusicTheory
         $isMinor = strpos($key, 'm') !== false;
         $root = str_replace('m', '', $key);
         
-        $progression = self::PROGRESSIONS[$progressionName] ?? self::PROGRESSIONS['vi_IV_I_V'];
+        $progression = self::PROGRESSIONS[$progressionName] ?? self::MELODIC_HOUSE_PROGRESSIONS[$progressionName] ?? self::PROGRESSIONS['vi_IV_I_V'];
         
         $chords = [];
         foreach ($progression as $degreeInfo) {
@@ -603,7 +766,10 @@ class MusicTheory
             'downtempo' => ['i_bII_bVII_i', 'atmospheric_suspended'],
             'trance' => ['vi_IV_I_V', 'classic_pop_edm', 'vi_IV_V_I_variant', 'levels_progression'],
             'drum_and_bass' => ['levels_progression', 'vi_IV_I_V', 'i_bVII_bVI_bVII', 'classic_pop_edm'],
-            'minimal_dub_techno' => ['atmospheric_suspended', 'i_iv_bVII_i', 'i_bII_bVII_i']
+            'minimal_dub_techno' => ['atmospheric_suspended', 'i_iv_bVII_i', 'i_bII_bVII_i'],
+            'synthwave'      => ['synthwave_classic', 'synthwave_retrowave', 'synthwave_dreamwave', 'synthwave_dark', 'andalusian_cadence'],
+            'darksynth'      => ['synthwave_dark', 'i_bVII_bVI_bVII', 'andalusian_cadence', 'phrygian_gate'],
+            'outrun'         => ['synthwave_classic', 'synthwave_uplifting', 'I_iii_vi_IV', 'classic_pop_edm'],
         ];
         
         // Return random progression from genre array, or default

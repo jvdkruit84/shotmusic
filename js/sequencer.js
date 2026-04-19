@@ -55,6 +55,7 @@ function switchPattern(name, rebuild=true) {
     loadPatternData(name);
     if (rebuild) { buildSeqGrid(); if(S.isPlaying) buildSeqLoop(); }
     buildPatternBar();
+    if(typeof refreshLauncherAll==='function') refreshLauncherAll();
     autoSave();
 }
 
@@ -120,6 +121,19 @@ function buildSeqLoop() {
             if(track.mute) return;
             // Piano roll tracks play via their own Tone.Part — skip in sequence
             if(track.editMode === 'pianoroll') return;
+            // Performance mode: activate queued pattern per track at bar start
+            if(step===0 && SEQ.performanceMode && track.queuedPattern) {
+                const pd = SEQ.patterns[track.queuedPattern]?.data[track.uid];
+                if(pd) {
+                    track.steps = [...pd.steps];
+                    track.vels  = [...pd.vels];
+                    track.probs = [...pd.probs];
+                    track.gates = [...(pd.gates ?? Array(32).fill(80))];
+                }
+                track.activePattern  = track.queuedPattern;
+                track.queuedPattern  = null;
+                Tone.Draw.schedule(()=>{ refreshLauncherRow(track); }, time);
+            }
             const prob=track.probs[step]??100;
             if(prob<100 && Math.random()*100>prob) return;
             const val=track.steps[step];
@@ -128,7 +142,15 @@ function buildSeqLoop() {
             const gate=track.gates?.[step]??80;
             const stepSec=Tone.Time('16n').toSeconds();
             const gateDur=Math.max(0.01, stepSec * gate / 100);
-            if(!track.melodic){ if(val) triggerTrack(track,time,vel); }
+            if(!track.melodic){ if(val) {
+                triggerTrack(track,time,vel);
+                // MIDI out — send GM drum note
+                if(track.midiOut?.enabled && typeof sendMidiNote==='function') {
+                    const ch=(track.midiOut.channel||10)-1;
+                    const dn=track.midiOut.drumNote||{kick:36,snare:38,hihat:42,sample:38}[track.type]||38;
+                    Tone.Draw.schedule(()=>sendMidiNote(ch,dn,vel,gateDur*1000),time);
+                }
+            }}
             else if(track.type==='pad') {
                 if(val!==null) {
                     const dur = track.padMode==='chord'
@@ -138,9 +160,23 @@ function buildSeqLoop() {
                         ? S.progression[S.currentChord].map(midiFreq)
                         : [midiFreq(val)];
                     track.synth?.triggerAttackRelease(notes, dur, time, v);
+                    // MIDI out — send root note of chord
+                    if(track.midiOut?.enabled && typeof sendMidiNote==='function') {
+                        const ch=(track.midiOut.channel||4)-1;
+                        const mn=track.padMode==='chord' && S.progression[S.currentChord]?.length
+                            ? S.progression[S.currentChord][0] : val;
+                        Tone.Draw.schedule(()=>sendMidiNote(ch,mn,vel,dur*1000),time);
+                    }
                 }
             }
-            else { if(val!==null) track.synth?.triggerAttackRelease(midiFreq(val),gateDur,time,v); }
+            else { if(val!==null) {
+                track.synth?.triggerAttackRelease(midiFreq(val),gateDur,time,v);
+                // MIDI out — send MIDI note
+                if(track.midiOut?.enabled && typeof sendMidiNote==='function') {
+                    const ch=(track.midiOut.channel||3)-1;
+                    Tone.Draw.schedule(()=>sendMidiNote(ch,val,vel,gateDur*1000),time);
+                }
+            }}
         });
         Tone.Draw.schedule(()=>{ S.currentSeqStep=step; updateSeqHighlight(step); },time);
     },Array.from({length:steps},(_,i)=>i),'16n');

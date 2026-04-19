@@ -234,6 +234,18 @@ document.getElementById('btnSongClear').addEventListener('click',()=>{
 document.getElementById('seqDefault').addEventListener('click',()=>{ pushHistory(); setDefaultPattern(); autoSave(); });
 document.getElementById('seqClear').addEventListener('click',()=>{ pushHistory(); clearPattern(); autoSave(); });
 document.getElementById('seqRandom').addEventListener('click',()=>{ pushHistory(); randomPattern(); autoSave(); });
+
+document.getElementById('btnMuteAll').addEventListener('click', () => {
+    const btn = document.getElementById('btnMuteAll');
+    const allMuted = SEQ.tracks.every(t => t.mute);
+    SEQ.tracks.forEach(t => {
+        t.mute = !allMuted;
+        document.querySelector(`.seq-mute-btn[data-uid="${t.uid}"]`)?.classList.toggle('muted', t.mute);
+    });
+    btn.classList.toggle('active', !allMuted);
+    btn.textContent = allMuted ? 'Mute All' : 'Unmute All';
+    autoSave();
+});
 document.getElementById('btnMelGen').addEventListener('click',function(){
     const panel=document.getElementById('melGenPanel');
     const open=panel.classList.toggle('open');
@@ -474,6 +486,7 @@ initMasterUI();
 initVizUI();
 document.getElementById('btnMixer').addEventListener('click', toggleMixer);
 document.getElementById('mixerClose').addEventListener('click', toggleMixer);
+document.getElementById('btnLauncher').addEventListener('click', () => toggleLauncher());
 loadProgression();
 loadScale();
 

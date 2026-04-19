@@ -25,4 +25,5 @@ const SEQ = window.SEQ || { tracks:[], steps:16, nextUid:1,
     patterns: Object.fromEntries(PATTERN_NAMES.map(n=>[n,{name:n,data:{}}])),
     currentPattern:'A', songMode:false, songArrangement:[], songPos:0,
     pianoRollBars: 4,
+    performanceMode: false,
 };

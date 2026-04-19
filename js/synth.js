@@ -215,11 +215,27 @@ function buildTrackSynth(track) {
         const bp = BASS_PRESETS[track.bassType ?? 'saw'] ?? BASS_PRESETS.saw;
         if (bp.osc === 'fm') {
             track.synth = new Tone.FMSynth({harmonicity:2,modulationIndex:6,envelope:{attack:.01,decay:.2,sustain:.5,release:.3},volume:-10}).connect(inp);
-        } else if (bp.dist) {
-            track.extra = new Tone.Distortion(.5).connect(inp);
-            track.synth = new Tone.MonoSynth({oscillator:{type:bp.osc},envelope:bp.env,filterEnvelope:{attack:bp.fe.atk,decay:bp.fe.dec,sustain:bp.fe.sus,release:bp.fe.rel,baseFrequency:bp.fe.base,octaves:bp.fe.oct},volume:bp.vol}).connect(track.extra);
         } else {
-            track.synth = new Tone.MonoSynth({oscillator:{type:bp.osc},envelope:bp.env,filterEnvelope:{attack:bp.fe.atk,decay:bp.fe.dec,sustain:bp.fe.sus,release:bp.fe.rel,baseFrequency:bp.fe.base,octaves:bp.fe.oct},volume:bp.vol}).connect(inp);
+            // osc can be a string or an object {type, count, spread}
+            const oscCfg = typeof bp.osc === 'object' ? bp.osc : { type: bp.osc };
+            const feCfg  = bp.fe ? {
+                attack: bp.fe.atk, decay: bp.fe.dec, sustain: bp.fe.sus, release: bp.fe.rel,
+                baseFrequency: bp.fe.base, octaves: bp.fe.oct
+            } : { baseFrequency: 200, octaves: 2, attack:.01, decay:.2, sustain:.5, release:.2 };
+            const filterCfg = { frequency: 20000, Q: bp.filter?.Q ?? 0, type: 'lowpass' };
+            const dest = bp.dist ? (track.extra = new Tone.Distortion(.45).connect(inp)) : inp;
+            track.synth = new Tone.MonoSynth({
+                oscillator: oscCfg, envelope: bp.env,
+                filterEnvelope: feCfg, filter: filterCfg,
+                volume: bp.vol ?? -6,
+            }).connect(dest);
+            // Auto-configure LFO for presets that request it (e.g. wobble)
+            if (bp.autoLfo) {
+                track.lfo = { enabled: true,
+                    target: bp.autoLfo.target ?? 'filter',
+                    rate:   bp.autoLfo.rate   ?? 4,
+                    depth:  bp.autoLfo.depth  ?? 0.5 };
+            }
         }
     } else if (track.type === 'melody') {
         const key = V('pianoSound') ?? 'pluck';

@@ -71,6 +71,8 @@ function collectProjectData() {
             editMode:   t.editMode ?? 'steps',
             pianoRoll:  t.pianoRoll ?? [],
             pianoRollBars: t.pianoRollBars ?? 4,
+            activePattern: t.activePattern ?? 'A',
+            midiOut:    t.midiOut ?? { enabled:false, channel:1, drumNote:null },
         })),
     };
 }
@@ -193,6 +195,9 @@ async function loadProjectData(data, opts={}) {
             pianoRoll:  td.pianoRoll ?? [],
             pianoRollBars: td.pianoRollBars ?? 4,
             part:       null,
+            activePattern: td.activePattern ?? 'A',
+            queuedPattern: null,
+            midiOut: td.midiOut ?? { enabled:false, channel:1, drumNote:null },
         };
         SEQ.tracks.push(t);
     });

@@ -199,14 +199,19 @@
             <input type="file" id="loadFileInput" accept=".json" style="display:none">
             <div class="t-divider"></div>
             <button class="btn btn-sec" id="btnMixer">⊞ Mixer</button>
+            <button class="btn btn-sec" id="btnLauncher">⊟ Launch</button>
             <div class="t-divider"></div>
             <button class="btn btn-sec" id="btnViz">◈ Viz</button>
             <div class="t-divider"></div>
+            <button class="btn btn-sec" id="btnMidiImport">↑ MIDI</button>
+            <input type="file" id="midiImportInput" accept=".mid,.midi" style="display:none">
             <button class="btn btn-sec" id="btnMidi">↓ MIDI</button>
+            <button class="btn btn-sec" id="btnMidiOut">⊙ VST</button>
             <button class="btn btn-sec" id="btnRecStart">● REC</button>
             <button class="btn btn-sec" id="btnRecStop" disabled>■ STOP</button>
             <div class="t-divider"></div>
             <button class="btn btn-danger" id="btnReset" title="Reset project naar standaard">↺ Reset</button>
+            <button class="btn btn-sec btn-help" id="btnHelp" title="Help (F1)">?</button>
         </div>
     </div>
 
@@ -284,6 +289,7 @@
             <button class="seq-ctrl-btn" id="seqDefault">Default</button>
             <button class="seq-ctrl-btn" id="seqClear">Clear</button>
             <button class="seq-ctrl-btn" id="seqRandom">Random</button>
+            <button class="seq-ctrl-btn seq-ctrl-mute" id="btnMuteAll" title="Mute / unmute alle tracks">Mute All</button>
             <button class="seq-ctrl-btn" id="btnMelGen">✦ Melodie</button>
             <div class="inline-ctrl">
                 Stappen
@@ -484,6 +490,9 @@
         <div class="piano-wrap"><div class="piano" id="piano"></div></div>
     </div>
 
+    <!-- Launcher / Performance panel -->
+    <div class="launcher-panel" id="launcherPanel"></div>
+
     <!-- Mixer panel -->
     <div class="mixer-panel" id="mixerPanel">
         <div class="mixer-header">
@@ -673,5 +682,10 @@
 <script src="js/app.js"></script>
 <script src="js/templates.js"></script>
 <script src="js/pianoroll.js"></script>
+<script src="js/launcher.js"></script>
+<script src="js/midi_import.js"></script>
+<script src="js/midi_out.js"></script>
+<script src="js/help.js"></script>
+<script src="js/splash.js"></script>
 </body>
 </html>

@@ -21,14 +21,75 @@ const KICK_PRESETS = {
 };
 
 // Bass synth presets
+// osc: string (waveform) or object {type, count, spread} for fat oscillators
+// fe: filter envelope {base, oct, atk, dec, sus, rel}
+// filter: optional {Q} for resonance
+// dist: add distortion node
+// am: use AMSynth instead of MonoSynth
 const BASS_PRESETS = {
-    saw:    { osc:'sawtooth', env:{attack:.01, decay:.12,sustain:.5, release:.2},  fe:{base:200,oct:3,  atk:.01, dec:.1,  sus:.5, rel:.2},  vol:-6  },
-    sub:    { osc:'sine',     env:{attack:.01, decay:.25,sustain:.8, release:.4},  fe:{base:60, oct:1.5,atk:.01, dec:.2,  sus:.6, rel:.3},  vol:-4  },
-    punchy: { osc:'square',   env:{attack:.005,decay:.08, sustain:.3, release:.1}, fe:{base:300,oct:4,  atk:.001,dec:.06, sus:.2, rel:.1},  vol:-5  },
-    '808':  { osc:'sine',     env:{attack:.01, decay:.7,  sustain:.4, release:.6}, fe:{base:80, oct:2,  atk:.01, dec:.5,  sus:.3, rel:.4},  vol:-3  },
-    pluck:  { osc:'triangle', env:{attack:.005,decay:.18, sustain:0,  release:.2}, fe:{base:500,oct:3,  atk:.001,dec:.15, sus:0,  rel:.1},  vol:-7  },
-    fm:     { osc:'fm' },  // FMSynth, handled separately
-    growl:  { osc:'sawtooth', env:{attack:.01, decay:.2,  sustain:.6, release:.2}, fe:{base:150,oct:5,  atk:.01, dec:.15, sus:.4, rel:.2},  vol:-12, dist:true },
+    // ── Classic ───────────────────────────────────────────────
+    saw:     { osc:'sawtooth',  env:{attack:.01, decay:.12, sustain:.5, release:.2},  fe:{base:200,oct:3,  atk:.01, dec:.1,  sus:.5, rel:.2},  vol:-6  },
+    sub:     { osc:'sine',      env:{attack:.01, decay:.25, sustain:.8, release:.4},  fe:{base:60, oct:1.5,atk:.01, dec:.2,  sus:.6, rel:.3},  vol:-4  },
+    punchy:  { osc:'square',    env:{attack:.005,decay:.08, sustain:.3, release:.1},  fe:{base:300,oct:4,  atk:.001,dec:.06, sus:.2, rel:.1},  vol:-5  },
+    '808':   { osc:'sine',      env:{attack:.01, decay:.7,  sustain:.4, release:.6},  fe:{base:80, oct:2,  atk:.01, dec:.5,  sus:.3, rel:.4},  vol:-3  },
+    pluck:   { osc:'triangle',  env:{attack:.005,decay:.18, sustain:0,  release:.2},  fe:{base:500,oct:3,  atk:.001,dec:.15, sus:0,  rel:.1},  vol:-7  },
+    fm:      { osc:'fm' },      // FMSynth, handled separately
+    growl:   { osc:'sawtooth',  env:{attack:.01, decay:.2,  sustain:.6, release:.2},  fe:{base:150,oct:5,  atk:.01, dec:.15, sus:.4, rel:.2},  vol:-12, dist:true },
+
+    // ── New additions ─────────────────────────────────────────
+    // Reese — classic jungle/DnB: drie gespreide zaagzagen, donker filter
+    reese:   { osc:{type:'fatsawtooth',count:3,spread:30},
+               env:{attack:.01, decay:.4,  sustain:.7, release:.4},
+               fe:{base:120,oct:2,  atk:.01, dec:.4,  sus:.5, rel:.3},
+               filter:{Q:3}, vol:-11 },
+
+    // Moog — warme analoge bas met karakteristieke resonantie
+    moog:    { osc:'sawtooth',  env:{attack:.008,decay:.25, sustain:.6, release:.35},
+               fe:{base:350,oct:3.5,atk:.005,dec:.18, sus:.4, rel:.25},
+               filter:{Q:5}, vol:-7  },
+
+    // Acid — TB-303 stijl: snelle filter-sweep, hoge resonantie
+    acid:    { osc:'sawtooth',  env:{attack:.002,decay:.12, sustain:.25,release:.15},
+               fe:{base:600,oct:4.5,atk:.001,dec:.09, sus:.1, rel:.1},
+               filter:{Q:10}, vol:-8  },
+
+    // Electric — elektrische bas gitaar gevoel: driehoek, snelle transient
+    electric:{ osc:'triangle',  env:{attack:.003,decay:.35, sustain:.5, release:.25},
+               fe:{base:700,oct:2,  atk:.001,dec:.28, sus:.4, rel:.2},
+               filter:{Q:2}, vol:-6  },
+
+    // Stab — scherpe staccato bas, zoals in house/garage
+    stab:    { osc:'square',    env:{attack:.001,decay:.07, sustain:.0, release:.08},
+               fe:{base:500,oct:4,  atk:.001,dec:.05, sus:.0, rel:.05},
+               vol:-5  },
+
+    // Liquid — vloeiend, rond, goed voor deep house / lounge
+    liquid:  { osc:'triangle',  env:{attack:.02, decay:.5,  sustain:.65,release:.5},
+               fe:{base:280,oct:2.5,atk:.04, dec:.4,  sus:.5, rel:.4},
+               filter:{Q:1.5}, vol:-7  },
+
+    // Rubber — elastisch, 'bouncy' gevoel, pitch-decay via sine + dist
+    rubber:  { osc:'sine',      env:{attack:.002,decay:.5,  sustain:.3, release:.4},
+               fe:{base:100,oct:5,  atk:.001,dec:.35, sus:.2, rel:.3},
+               dist:true, vol:-9  },
+
+    // Wobble — brede fat-saw klaar voor LFO op filter (dubstep/bass music)
+    wobble:  { osc:{type:'fatsawtooth',count:2,spread:15},
+               env:{attack:.01, decay:.3,  sustain:.8, release:.3},
+               fe:{base:200,oct:3,  atk:.01, dec:.2,  sus:.6, rel:.3},
+               filter:{Q:6}, vol:-10,
+               autoLfo:{ target:'filter', rate:4, depth:0.7 } },
+
+    // Vintage — warme vintage synth bas, à la Minimoog / Juno
+    vintage: { osc:{type:'fatsawtooth',count:2,spread:8},
+               env:{attack:.012,decay:.2,  sustain:.7, release:.4},
+               fe:{base:300,oct:2.5,atk:.01, dec:.15, sus:.5, rel:.3},
+               filter:{Q:2.5}, vol:-8  },
+
+    // Atari — retro 8-bit bas, harde blokgolf
+    atari:   { osc:'square',    env:{attack:.001,decay:.18, sustain:.6, release:.2},
+               fe:{base:800,oct:1.5,atk:.001,dec:.1,  sus:.5, rel:.15},
+               vol:-6  },
 };
 
 // Pad synth presets (long attack, slow release)
@@ -74,7 +135,13 @@ function makeTrack(type, overrides={}) {
         synth:null, extra:null, howl:null, filename:null,
         fx:{ rev: (type==='melody'||type==='pad')?.3:0, dly:0, flt:20000, dist:0 }, fxNodes:null,
         lfo:{ enabled:false, target:'filter', rate:2, depth:0.3 }, lfoNode:null,
-        // Piano roll
-        pianoRoll: [], editMode: 'steps', pianoRollBars: 4, part: null,
+        // Piano roll — melodic tracks default to pianoroll mode
+        pianoRoll: [], editMode: def.melodic ? 'pianoroll' : 'steps', pianoRollBars: 4, part: null,
+        // Clip launcher
+        activePattern: 'A', queuedPattern: null,
+        // MIDI output
+        midiOut: { enabled: false,
+            channel: {kick:10,snare:10,hihat:10,bass:2,melody:3,pad:4,sample:10}[type] || 1,
+            drumNote: {kick:36,snare:38,hihat:42,sample:38}[type] || null },
     }, overrides);
 }

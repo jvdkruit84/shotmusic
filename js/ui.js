@@ -186,7 +186,7 @@ function buildSeqGrid() {
         });
         typeSel.addEventListener('change',function(){ changeTrackType(track, this.value); });
 
-        const mute=document.createElement('button'); mute.className='seq-mute-btn'+(track.mute?' muted':''); mute.textContent='M';
+        const mute=document.createElement('button'); mute.className='seq-mute-btn'+(track.mute?' muted':''); mute.textContent='M'; mute.dataset.uid=track.uid;
         mute.addEventListener('click',()=>{track.mute=!track.mute;mute.classList.toggle('muted',track.mute); autoSave();});
         const fxBtn=document.createElement('button'); fxBtn.className='seq-fx-btn'; fxBtn.textContent='FX';
         const eucBtn=document.createElement('button'); eucBtn.className='seq-euclid-btn'; eucBtn.textContent='E'; eucBtn.title='Euclidisch ritme';
@@ -198,14 +198,16 @@ function buildSeqGrid() {
         if(track.melodic){
             const prBtn=document.createElement('button');
             prBtn.className='seq-pr-btn'+(track.editMode==='pianoroll'?' active':'');
-            prBtn.textContent='PR'; prBtn.title='Piano Roll editor';
+            prBtn.textContent='PR'; prBtn.title='Piano Roll — klik om te bewerken, dubbelklik om stap-modus terug te zetten';
             prBtn.dataset.uid=track.uid;
             prBtn.addEventListener('click',()=>{ if(typeof openPianoRoll==='function') openPianoRoll(track); });
-            row1.append(handle,typeSel,mute,fxBtn,eucBtn,scBtn,prBtn,rem);
+            prBtn.addEventListener('dblclick',e=>{ e.stopPropagation(); if(typeof toggleEditMode==='function') toggleEditMode(track); buildSeqGrid(); });
+            row1.append(handle,typeSel,mute,fxBtn,eucBtn,scBtn,prBtn);
         } else {
-            row1.append(handle,typeSel,mute,fxBtn,eucBtn,scBtn,rem);
+            row1.append(handle,typeSel,mute,fxBtn,eucBtn,scBtn);
         }
         hdr.appendChild(row1);
+        hdr.appendChild(rem);
 
         // Kick type selector
         if(track.type==='kick'){
@@ -283,7 +285,12 @@ function buildSeqGrid() {
         // Bass type selector
         if(track.type==='bass'){
             const bt=document.createElement('select'); bt.className='seq-bass-type';
-            [{v:'saw',l:'Saw'},{v:'sub',l:'Sub'},{v:'punchy',l:'Punchy'},{v:'808',l:'808'},{v:'pluck',l:'Pluck'},{v:'fm',l:'FM'},{v:'growl',l:'Growl'}].forEach(({v,l})=>{
+            [{v:'saw',l:'Saw'},{v:'sub',l:'Sub'},{v:'punchy',l:'Punchy'},{v:'808',l:'808'},
+             {v:'pluck',l:'Pluck'},{v:'fm',l:'FM'},{v:'growl',l:'Growl'},
+             {v:'reese',l:'Reese'},{v:'moog',l:'Moog'},{v:'acid',l:'Acid'},
+             {v:'electric',l:'Electric'},{v:'stab',l:'Stab'},{v:'liquid',l:'Liquid'},
+             {v:'rubber',l:'Rubber'},{v:'wobble',l:'Wobble'},
+             {v:'vintage',l:'Vintage'},{v:'atari',l:'Atari'}].forEach(({v,l})=>{
                 const o=document.createElement('option'); o.value=v; o.textContent=l;
                 if(v===track.bassType)o.selected=true; bt.appendChild(o);
             });
@@ -402,14 +409,22 @@ function buildSeqGrid() {
         mixRow.append(volCtrl,sep,panCtrl);
         row.appendChild(mixRow);
 
-        // Steps
-        const stepsWrap=document.createElement('div'); stepsWrap.className='seq-steps';
-        for(let g=0;g<SEQ.steps/4;g++){
-            const grp=document.createElement('div'); grp.className='seq-step-group';
-            for(let s=0;s<4;s++) grp.appendChild(makeStepBtn(track,g*4+s));
-            stepsWrap.appendChild(grp);
+        // Steps or mini piano roll preview
+        if(track.melodic && track.editMode==='pianoroll'){
+            const preview=document.createElement('div'); preview.className='seq-pr-preview';
+            preview.dataset.uid=track.uid;
+            drawMiniPianoRoll(preview, track);
+            preview.addEventListener('click',()=>{ if(typeof openPianoRoll==='function') openPianoRoll(track); });
+            row.appendChild(preview);
+        } else {
+            const stepsWrap=document.createElement('div'); stepsWrap.className='seq-steps';
+            for(let g=0;g<SEQ.steps/4;g++){
+                const grp=document.createElement('div'); grp.className='seq-step-group';
+                for(let s=0;s<4;s++) grp.appendChild(makeStepBtn(track,g*4+s));
+                stepsWrap.appendChild(grp);
+            }
+            row.appendChild(stepsWrap);
         }
-        row.appendChild(stepsWrap);
         grid.appendChild(row);
     });
 
@@ -423,6 +438,65 @@ function buildSeqGrid() {
     grid.appendChild(addRow);
     if(typeof refreshKbdRecTrack==='function') refreshKbdRecTrack();
     if(typeof refreshMixerIfOpen==='function') refreshMixerIfOpen();
+}
+
+function drawMiniPianoRoll(container, track) {
+    const notes = track.pianoRoll ?? [];
+    const bars  = track.pianoRollBars ?? 4;
+    const totalBeats = bars * 4;
+    container.innerHTML = '';
+
+    if (!notes.length) {
+        container.innerHTML = '<span class="seq-pr-empty">Klik MIDI om noten te tekenen</span>';
+        return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'seq-pr-canvas';
+    container.appendChild(canvas);
+
+    // Size canvas to container after paint
+    requestAnimationFrame(() => {
+        const w = container.clientWidth || 480;
+        const h = container.clientHeight || 36;
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width  = w * dpr; canvas.height = h * dpr;
+        canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+
+        // MIDI range from notes
+        const midiVals = notes.map(n => n.note);
+        let lo = Math.min(...midiVals) - 1;
+        let hi = Math.max(...midiVals) + 1;
+        if (hi - lo < 4) { lo -= 2; hi += 2; }
+        const range = hi - lo;
+
+        // Background
+        ctx.fillStyle = '#0e1018';
+        ctx.fillRect(0, 0, w, h);
+
+        // Beat grid
+        for (let b = 0; b <= totalBeats; b++) {
+            const x = (b / totalBeats) * w;
+            ctx.strokeStyle = b % 4 === 0 ? '#2a2d3e' : '#1a1c26';
+            ctx.lineWidth = b % 4 === 0 ? 1.5 : 0.5;
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        }
+
+        // Notes
+        notes.forEach(n => {
+            const x  = (n.start / totalBeats) * w;
+            const nw = Math.max(2, (n.dur / totalBeats) * w - 1);
+            const y  = h - ((n.note - lo) / range) * h - 3;
+            const nh = Math.max(2, h / range - 1);
+            ctx.globalAlpha = 0.4 + (n.vel / 127) * 0.6;
+            ctx.fillStyle = track.color ?? '#5b7df5';
+            ctx.fillRect(x, y, nw, nh);
+        });
+        ctx.globalAlpha = 1;
+    });
 }
 
 function makeStepBtn(track, idx) {

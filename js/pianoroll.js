@@ -75,11 +75,16 @@ function buildPianoRollPart(track) {
 
     const events = track.pianoRoll.map(n => [
         n.start * beatSec,
-        { note: midiFreq(n.note), dur: Math.max(0.01, n.dur * beatSec), vel: Math.max(0.01, Math.min(1, n.vel / 127)) }
+        { note: midiFreq(n.note), midi: n.note, dur: Math.max(0.01, n.dur * beatSec), vel: Math.max(0.01, Math.min(1, n.vel / 127)) }
     ]);
 
     track.part = new Tone.Part((time, v) => {
         track.synth.triggerAttackRelease(v.note, v.dur, time, v.vel);
+        // MIDI out
+        if (track.midiOut?.enabled && typeof sendMidiNote === 'function') {
+            const ch = (track.midiOut.channel || 3) - 1;
+            Tone.Draw.schedule(() => sendMidiNote(ch, v.midi, Math.round(v.vel * 127), v.dur * 1000), time);
+        }
     }, events);
     track.part.loop    = true;
     track.part.loopEnd = loopEnd;
@@ -140,6 +145,7 @@ function closePianoRoll() {
     PR.open  = false;
     PR.track = null;
     cancelAnimationFrame(PR.raf);
+    if (typeof buildSeqGrid === 'function') buildSeqGrid();
 }
 
 function scrollToCenterPitch() {

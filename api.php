@@ -116,6 +116,76 @@ switch ($action) {
         ]);
         break;
 
+    case 'getSampleFile':
+        // Serve a sample file safely through PHP (avoids static-file encoding issues)
+        $pack     = $_GET['pack'] ?? '';
+        $subpath  = $_GET['path'] ?? '';
+        $filename = $_GET['file'] ?? '';
+
+        // Strip path traversal from each component
+        $safePack = str_replace(['..','\\'], '', $pack);
+        $safePath = implode('/', array_filter(
+            explode('/', str_replace('\\', '/', $subpath)),
+            fn($p) => $p !== '' && $p !== '..' && $p !== '.'
+        ));
+        $safeFile = basename($filename);
+
+        $fullPath = $safePath
+            ? __DIR__ . "/samples/$safePack/$safePath/$safeFile"
+            : __DIR__ . "/samples/$safePack/$safeFile";
+
+        if (!$safeFile || !file_exists($fullPath) || !is_file($fullPath)) {
+            http_response_code(404);
+            echo json_encode(['error' => 'Not found']);
+            break;
+        }
+
+        $ext   = strtolower(pathinfo($safeFile, PATHINFO_EXTENSION));
+        $mimes = ['wav'=>'audio/wav','mp3'=>'audio/mpeg','ogg'=>'audio/ogg',
+                  'aiff'=>'audio/aiff','flac'=>'audio/flac'];
+        header('Content-Type: ' . ($mimes[$ext] ?? 'audio/octet-stream'));
+        header('Accept-Ranges: bytes');
+        header('Cache-Control: public, max-age=3600');
+        header('Content-Length: ' . filesize($fullPath));
+        readfile($fullPath);
+        exit;
+
+    case 'getSamplePacks':
+        // Recursively scan any folder structure inside a pack directory.
+        // Returns { packName: { "relative/path/to/folder": ["file.wav", ...] } }
+        function scanAudioDir($dir, $packRoot) {
+            $result = [];
+            foreach (array_diff(scandir($dir), ['.','..']) as $entry) {
+                $full = "$dir/$entry";
+                if (is_dir($full)) {
+                    $sub = scanAudioDir($full, $packRoot);
+                    foreach ($sub as $k => $v) $result[$k] = $v;
+                } elseif (preg_match('/\.(wav|mp3|ogg|aiff|flac)$/i', $entry)) {
+                    $relDir = ltrim(str_replace($packRoot, '', $dir), '/\\');
+                    $key    = $relDir === '' ? '.' : $relDir;
+                    $result[$key][] = $entry;
+                }
+            }
+            return $result;
+        }
+
+        $samplesDir = __DIR__ . '/samples';
+        $packs = [];
+        if (is_dir($samplesDir)) {
+            foreach (array_diff(scandir($samplesDir), ['.','..']) as $pack) {
+                $packDir = "$samplesDir/$pack";
+                if (!is_dir($packDir)) continue;
+                $cats = scanAudioDir($packDir, $packDir);
+                if ($cats) {
+                    ksort($cats);
+                    foreach ($cats as &$files) sort($files);
+                    $packs[$pack] = $cats;
+                }
+            }
+        }
+        echo json_encode($packs);
+        break;
+
     default:
         http_response_code(400);
         echo json_encode(['error' => 'Unknown action']);

@@ -73,13 +73,18 @@ function buildPianoRollPart(track) {
     const beatSec = 60 / bpm;
     const loopEnd = track.pianoRollBars * 4 * beatSec;
 
-    const events = track.pianoRoll.map(n => [
-        n.start * beatSec,
-        { note: midiFreq(n.note), midi: n.note, dur: Math.max(0.01, n.dur * beatSec), vel: Math.max(0.01, Math.min(1, n.vel / 127)) }
-    ]);
+    const events = track.pianoRoll.map(n => {
+        const startSec = n.start * beatSec;
+        // Cap duration so note + release doesn't bleed into next loop iteration,
+        // which would cause fresh voice allocation (lazy FatOscillator) on every repeat.
+        const maxDur = Math.max(0.01, loopEnd - startSec - 0.05);
+        const dur = Math.min(Math.max(0.01, n.dur * beatSec), maxDur);
+        return [startSec, { note: midiFreq(n.note), midi: n.note, dur, vel: Math.max(0.01, Math.min(1, n.vel / 127)) }];
+    });
 
     track.part = new Tone.Part((time, v) => {
-        track.synth.triggerAttackRelease(v.note, v.dur, time, v.vel);
+        if (track.mute) return;
+        try { track.synth?.triggerAttackRelease(v.note, v.dur, time, v.vel); } catch(e) {}
         // MIDI out
         if (track.midiOut?.enabled && typeof sendMidiNote === 'function') {
             const ch = (track.midiOut.channel || 3) - 1;

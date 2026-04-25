@@ -94,10 +94,12 @@ function buildChordPart() {
     chordPart?.dispose(); chordPart=null;
     if(!S.progression.length) return;
     const bpc=+V('chordBars');
+    const dur=Tone.Time(`${bpc}m`).toSeconds()*.85;
     const events=S.progression.map((notes,i)=>({time:`${i*bpc}:0:0`,notes,idx:i}));
     chordPart=new Tone.Part((time,val)=>{
-        const dur=Tone.Time(`${bpc}m`).toSeconds()*.85;
-        if(!S.chordMute) chordSynth?.triggerAttackRelease(val.notes.map(midiFreq),dur,time);
+        // Only auto-play if no chord steps are programmed
+        const hasChordSteps=SEQ.chordSteps?.some(s=>s);
+        if(!S.chordMute && !hasChordSteps) chordSynth?.triggerAttackRelease(val.notes.map(midiFreq),dur,time);
         Tone.Draw.schedule(()=>{
             setActiveChord(val.idx);
             document.querySelectorAll('.chord-card').forEach((c,i)=>c.classList.toggle('playing',i===val.idx));
@@ -110,13 +112,59 @@ function buildChordPart() {
 
 
 // ── Sequencer UI ────────────────────────────────────────────
+function updateChordStepHighlight(step) {
+    document.querySelectorAll('.chord-step-btn').forEach((b,i)=>{
+        b.classList.toggle('playing', i===step);
+    });
+}
+
+function buildChordStepRow(grid) {
+    const row=document.createElement('div'); row.className='seq-track chord-step-row';
+    const hdr=document.createElement('div'); hdr.className='seq-track-header';
+    hdr.style.borderLeftColor='#c77dff';
+    const lbl=document.createElement('span'); lbl.className='chord-step-label'; lbl.textContent='CHORDS';
+    // Gate select
+    const gSel=document.createElement('select'); gSel.className='chord-step-gate-sel'; gSel.title='Chord duur';
+    [['stab','Stab'],['half','Half bar'],['bar','1 Bar'],['full','Full']].forEach(([v,t])=>{
+        const o=document.createElement('option'); o.value=v; o.textContent=t;
+        if(v==='bar') o.selected=true;
+        gSel.appendChild(o);
+    });
+    gSel.addEventListener('change',function(){
+        const map={stab:0.25,half:0.5,bar:0.75,full:0.98};
+        SEQ.chordStepGate=map[this.value]??0.75; autoSave();
+    });
+    // Clear btn
+    const clr=document.createElement('button'); clr.className='seq-ctrl-btn'; clr.textContent='Clear'; clr.style.fontSize='7.5px';
+    clr.addEventListener('click',()=>{ SEQ.chordSteps=Array(32).fill(0); buildChordStepRow.refresh?.(); autoSave(); buildSeqGrid(); });
+    hdr.append(lbl,gSel,clr);
+    row.appendChild(hdr);
+    // Step buttons
+    const steps=document.createElement('div'); steps.className='seq-steps chord-step-steps';
+    for(let i=0;i<SEQ.steps;i++){
+        const b=document.createElement('button');
+        b.className='seq-step chord-step-btn'+(SEQ.chordSteps[i]?' on':'');
+        b.dataset.idx=i;
+        b.addEventListener('click',()=>{
+            SEQ.chordSteps[i]=SEQ.chordSteps[i]?0:1;
+            b.classList.toggle('on',!!SEQ.chordSteps[i]);
+            // Rebuild chord part to update has-steps flag
+            if(S.isPlaying) buildChordPart();
+            autoSave();
+        });
+        steps.appendChild(b);
+    }
+    row.appendChild(steps);
+    grid.appendChild(row);
+}
+
 function buildSeqGrid() {
     if(document.getElementById('melGenPanel')?.classList.contains('open')) updateMgTrackList();
     const grid=document.getElementById('seqGrid'); grid.innerHTML='';
+    buildChordStepRow(grid);
 
     SEQ.tracks.forEach(track=>{
         const row=document.createElement('div'); row.className='seq-track'; row.dataset.uid=track.uid;
-        row.style.borderLeftColor=track.color;
 
         // Drag events
         row.addEventListener('dragstart', e=>{
@@ -145,10 +193,17 @@ function buildSeqGrid() {
             SEQ.tracks.splice(toIdx,0,moved);
             buildSeqGrid();
             if(S.isPlaying) buildSeqLoop();
+            autoSave();
         });
 
         // Header
         const hdr=document.createElement('div'); hdr.className='seq-track-header';
+        hdr.style.borderLeftColor=track.color;
+
+        // VU-meter (leeft buiten flex-flow, absolute gepositioneerd)
+        const vuBar=document.createElement('div'); vuBar.className='seq-vu-bar';
+        const vuFill=document.createElement('div'); vuFill.className='seq-vu-fill'; vuFill.dataset.uid=track.uid;
+        vuBar.appendChild(vuFill); hdr.appendChild(vuBar);
 
         const row1=document.createElement('div'); row1.className='seq-track-row1';
 
@@ -187,7 +242,11 @@ function buildSeqGrid() {
         typeSel.addEventListener('change',function(){ changeTrackType(track, this.value); });
 
         const mute=document.createElement('button'); mute.className='seq-mute-btn'+(track.mute?' muted':''); mute.textContent='M'; mute.dataset.uid=track.uid;
-        mute.addEventListener('click',()=>{track.mute=!track.mute;mute.classList.toggle('muted',track.mute); autoSave();});
+        mute.addEventListener('click',()=>{
+            track.mute=!track.mute; mute.classList.toggle('muted',track.mute);
+            if(track.mute){ try{track.synth?.releaseAll?.();}catch(e){} try{track.synth?.triggerRelease?.();}catch(e){} }
+            autoSave();
+        });
         const fxBtn=document.createElement('button'); fxBtn.className='seq-fx-btn'; fxBtn.textContent='FX';
         const eucBtn=document.createElement('button'); eucBtn.className='seq-euclid-btn'; eucBtn.textContent='E'; eucBtn.title='Euclidisch ritme';
         const scBtn=document.createElement('button'); scBtn.className='seq-sc-btn'+(track.sidechain?' active':''); scBtn.textContent='SC';
@@ -195,6 +254,9 @@ function buildSeqGrid() {
         scBtn.addEventListener('click',()=>{ track.sidechain=!track.sidechain; scBtn.classList.toggle('active',track.sidechain); autoSave(); });
         const rem=document.createElement('button'); rem.className='seq-remove-btn'; rem.title='Verwijder'; rem.textContent='×';
         rem.addEventListener('click',()=>removeTrack(track.uid));
+        const autoBtn=document.createElement('button'); autoBtn.className='seq-auto-btn'; autoBtn.textContent='AUTO';
+        autoBtn.title='Automation lane — klik om te openen';
+        autoBtn.addEventListener('click',()=>{ if(typeof toggleAutoLane==='function') toggleAutoLane(track, autoBtn); });
         if(track.melodic){
             const prBtn=document.createElement('button');
             prBtn.className='seq-pr-btn'+(track.editMode==='pianoroll'?' active':'');
@@ -202,9 +264,9 @@ function buildSeqGrid() {
             prBtn.dataset.uid=track.uid;
             prBtn.addEventListener('click',()=>{ if(typeof openPianoRoll==='function') openPianoRoll(track); });
             prBtn.addEventListener('dblclick',e=>{ e.stopPropagation(); if(typeof toggleEditMode==='function') toggleEditMode(track); buildSeqGrid(); });
-            row1.append(handle,typeSel,mute,fxBtn,eucBtn,scBtn,prBtn);
+            row1.append(handle,typeSel,mute,fxBtn,eucBtn,scBtn,prBtn,autoBtn);
         } else {
-            row1.append(handle,typeSel,mute,fxBtn,eucBtn,scBtn);
+            row1.append(handle,typeSel,mute,fxBtn,eucBtn,scBtn,autoBtn);
         }
         hdr.appendChild(row1);
         hdr.appendChild(rem);
@@ -222,6 +284,22 @@ function buildSeqGrid() {
                 setStatus('Kick: '+this.value,'ok');
             });
             hdr.appendChild(kt);
+        }
+
+        // Snare type selector
+        if(track.type==='snare'){
+            const st=document.createElement('select'); st.className='seq-kick-type';
+            ['acoustic','electronic','clap','rimshot','brushed','big_room','trap','vinyl'].forEach(t=>{
+                const o=document.createElement('option'); o.value=t;
+                o.textContent={acoustic:'Acoustic',electronic:'Electronic',clap:'Clap',rimshot:'Rimshot',brushed:'Brushed',big_room:'Big Room',trap:'Trap',vinyl:'Vinyl'}[t]||t;
+                if(t===track.snareType)o.selected=true; st.appendChild(o);
+            });
+            st.addEventListener('change',function(){
+                track.snareType=this.value;
+                if(S.audioReady) buildTrackSynth(track);
+                setStatus('Snare: '+this.value,'ok');
+            });
+            hdr.appendChild(st);
         }
 
         // Hi-hat type selector
@@ -260,7 +338,11 @@ function buildSeqGrid() {
         // Pad preset + mode selector
         if(track.type==='pad'){
             const pp=document.createElement('select'); pp.className='seq-bass-type';
-            [{v:'warm',l:'Warm'},{v:'lush',l:'Lush'},{v:'dark',l:'Dark'},{v:'aether',l:'Aether'},{v:'strings',l:'Strings'},{v:'glass',l:'Glass'},{v:'choir',l:'Choir'}].forEach(({v,l})=>{
+            [{v:'warm',l:'Warm'},{v:'lush',l:'Lush'},{v:'dark',l:'Dark'},{v:'aether',l:'Aether'},
+             {v:'strings',l:'Strings'},{v:'glass',l:'Glass'},{v:'choir',l:'Choir'},
+             {v:'arctic',l:'Arctic'},{v:'shimmer',l:'Shimmer'},{v:'drone',l:'Drone'},
+             {v:'haunted',l:'Haunted'},{v:'cosmic',l:'Cosmic'},{v:'vintage',l:'Vintage'},
+             {v:'breath',l:'Breath'},{v:'angel',l:'Angel'}].forEach(({v,l})=>{
                 const o=document.createElement('option'); o.value=v; o.textContent=l;
                 if(v===track.padPreset)o.selected=true; pp.appendChild(o);
             });
@@ -290,7 +372,9 @@ function buildSeqGrid() {
              {v:'reese',l:'Reese'},{v:'moog',l:'Moog'},{v:'acid',l:'Acid'},
              {v:'electric',l:'Electric'},{v:'stab',l:'Stab'},{v:'liquid',l:'Liquid'},
              {v:'rubber',l:'Rubber'},{v:'wobble',l:'Wobble'},
-             {v:'vintage',l:'Vintage'},{v:'atari',l:'Atari'}].forEach(({v,l})=>{
+             {v:'vintage',l:'Vintage'},{v:'atari',l:'Atari'},
+             {v:'tape',l:'Tape'},{v:'funk',l:'Funk'},{v:'dub',l:'Dub'},
+             {v:'zap',l:'Zap'},{v:'dirt',l:'Dirt'}].forEach(({v,l})=>{
                 const o=document.createElement('option'); o.value=v; o.textContent=l;
                 if(v===track.bassType)o.selected=true; bt.appendChild(o);
             });
@@ -301,6 +385,16 @@ function buildSeqGrid() {
             });
             hdr.appendChild(bt);
         }
+
+        // Sample browser button for all percussion tracks
+        if(['kick','snare','hihat','sample'].includes(track.type)){
+            const sbRow=document.createElement('div');
+            sbRow.className='seq-sample-row';
+            sbRow.dataset.uid=track.uid;
+            if(typeof _buildSampleRow==='function') _buildSampleRow(sbRow, track);
+            hdr.appendChild(sbRow);
+        }
+
         row.appendChild(hdr);
 
         // FX panel
@@ -316,9 +410,51 @@ function buildSeqGrid() {
             const lbl=document.createElement('label'); lbl.textContent=label;
             const sl=document.createElement('input'); sl.type='range'; sl.min=min; sl.max=max; sl.step=step; sl.value=track.fx[k];
             const val=document.createElement('span'); val.className='fx-val'; val.textContent=fmt(track.fx[k]);
-            sl.addEventListener('input',()=>{ val.textContent=fmt(+sl.value); updateTrackFx(track,k,+sl.value); });
-            wrap.append(lbl,sl,val); fxPanel.appendChild(wrap);
+            sl.addEventListener('input',()=>{ val.textContent=fmt(+sl.value); updateTrackFx(track,k,+sl.value); autoSave(); });
+            // MIDI Learn button for Rev and Filter
+            if((k==='flt'||k==='rev')&&typeof makeMlBtn==='function'){
+                const norm=k==='flt'?v=>(v*(max-min)+min):v=>v;
+                const mlBtn=makeMlBtn(v=>{ sl.value=norm(v); sl.dispatchEvent(new Event('input')); },`${track.label} ${label}`);
+                wrap.append(lbl,sl,val,mlBtn);
+            } else {
+                wrap.append(lbl,sl,val);
+            }
+            fxPanel.appendChild(wrap);
         });
+        // ── EQ section ───────────────────────────────────────────
+        const eqSection=document.createElement('div'); eqSection.className='eq-section';
+        const eqTitle=document.createElement('span'); eqTitle.className='eq-section-title'; eqTitle.textContent='EQ';
+        eqSection.appendChild(eqTitle);
+        [{b:'low',lbl:'Low'},{b:'mid',lbl:'Mid'},{b:'high',lbl:'Hi'}].forEach(({b,lbl})=>{
+            const wrap=document.createElement('div'); wrap.className='fx-knob eq-knob';
+            const label=document.createElement('label'); label.textContent=lbl;
+            const sl=document.createElement('input'); sl.type='range'; sl.min=-12; sl.max=12; sl.step=0.5; sl.value=track.eq?.[b]??0;
+            const fmtEq=v=>(v>=0?'+':'')+parseFloat(v).toFixed(1)+'dB';
+            const val=document.createElement('span'); val.className='fx-val'; val.textContent=fmtEq(sl.value);
+            sl.addEventListener('input',()=>{ val.textContent=fmtEq(+sl.value); updateTrackEq(track,b,+sl.value); autoSave(); });
+            const mlBtn=typeof makeMlBtn==='function'
+                ? makeMlBtn(v=>{ sl.value=(v*24-12).toFixed(1); sl.dispatchEvent(new Event('input')); }, `${track.label} EQ ${lbl}`) : null;
+            wrap.append(label,sl,val); if(mlBtn) wrap.appendChild(mlBtn);
+            eqSection.appendChild(wrap);
+        });
+        fxPanel.appendChild(eqSection);
+
+        // ── Bus routing ──────────────────────────────────────────
+        const busRow=document.createElement('div'); busRow.className='fx-bus-row';
+        const busLbl=document.createElement('label'); busLbl.textContent='Bus'; busLbl.style.cssText='font-size:8px;color:var(--muted);font-weight:700';
+        const busSel=document.createElement('select'); busSel.className='fx-bus-sel';
+        const noneOpt=document.createElement('option'); noneOpt.value=''; noneOpt.textContent='Master (direct)'; busSel.appendChild(noneOpt);
+        (window.BUS_DEFS||[]).forEach(def=>{
+            const o=document.createElement('option'); o.value=def.id; o.textContent=def.label;
+            if(track.busRoute===def.id) o.selected=true; busSel.appendChild(o);
+        });
+        busSel.addEventListener('change',()=>{
+            track.busRoute=busSel.value||null;
+            if(typeof rerouteTrack==='function') rerouteTrack(track);
+            autoSave();
+        });
+        busRow.append(busLbl,busSel); fxPanel.appendChild(busRow);
+
         // LFO section inside FX panel
         const lfoSection=document.createElement('div'); lfoSection.className='lfo-section';
         const lfoToggle=document.createElement('button'); lfoToggle.className='lfo-toggle'+(track.lfo.enabled?' active':''); lfoToggle.textContent='LFO';
@@ -406,8 +542,8 @@ function buildSeqGrid() {
             updateTrackMixer(track,'pan',v); autoSave();
         });
         panCtrl.append(panLbl,panSl,panVal);
-        mixRow.append(volCtrl,sep,panCtrl);
-        row.appendChild(mixRow);
+        mixRow.append(volCtrl,panCtrl);
+        hdr.appendChild(mixRow);
 
         // Steps or mini piano roll preview
         if(track.melodic && track.editMode==='pianoroll'){

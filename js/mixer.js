@@ -20,7 +20,63 @@ function buildMixerUI() {
     const container = document.getElementById('mixerStrips');
     container.innerHTML = '';
     SEQ.tracks.forEach(t => container.appendChild(buildChannelStrip(t)));
+    // Bus strips
+    (window.BUS_DEFS || []).forEach(def => container.appendChild(buildBusStrip(def)));
     container.appendChild(buildMasterStrip());
+}
+
+window.refreshBusMixer = function() {
+    if (mixerOpen) buildMixerUI();
+};
+
+function buildBusStrip(def) {
+    const st = window.BUS_STATE?.[def.id] || { vol:0, mute:false };
+    const strip = document.createElement('div');
+    strip.className = 'mix-strip mix-bus-strip';
+    strip.dataset.busId = def.id;
+    strip.style.setProperty('--track-color', def.color);
+
+    strip.innerHTML = `
+        <div class="mix-strip-hdr" style="--track-color:${def.color}">
+            <span class="mix-label">${def.label}</span>
+            <span class="mix-bus-badge">BUS</span>
+        </div>`;
+
+    // Volume fader
+    const faderWrap = document.createElement('div'); faderWrap.className = 'mix-fader-wrap';
+    const fader = document.createElement('input');
+    fader.type='range'; fader.className='mix-fader'; fader.min=-40; fader.max=6; fader.step=0.5;
+    fader.value = st.vol;
+    const volVal = document.createElement('span'); volVal.className = 'mix-vol-val';
+    volVal.textContent = (st.vol>0?'+':'')+Number(st.vol).toFixed(1)+'dB';
+    fader.addEventListener('input', function() {
+        const v = +this.value;
+        volVal.textContent = (v>0?'+':'')+v.toFixed(1)+'dB';
+        if(typeof updateBus==='function') updateBus(def.id, 'vol', v);
+    });
+    faderWrap.append(fader, volVal);
+    strip.appendChild(faderWrap);
+
+    const btnRow = document.createElement('div'); btnRow.className = 'mix-btn-row';
+    const muteBtn = document.createElement('button');
+    muteBtn.className = 'mix-btn mix-mute-btn' + (st.mute ? ' active' : '');
+    muteBtn.textContent = 'M';
+    muteBtn.addEventListener('click', () => {
+        st.mute = !st.mute;
+        muteBtn.classList.toggle('active', st.mute);
+        if(typeof updateBus==='function') updateBus(def.id, 'mute', st.mute);
+    });
+    btnRow.appendChild(muteBtn);
+    strip.appendChild(btnRow);
+
+    // Track count badge
+    const badge = document.createElement('div');
+    badge.className = 'mix-bus-tracks';
+    const routed = SEQ.tracks.filter(t => t.busRoute === def.id);
+    badge.textContent = routed.length ? routed.map(t=>t.label).join(', ') : 'geen tracks';
+    strip.appendChild(badge);
+
+    return strip;
 }
 
 function buildChannelStrip(track) {

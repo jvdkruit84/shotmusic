@@ -105,17 +105,33 @@ function euclidean(hits, steps, rotate=0) {
 function buildSeqLoop() {
     seqLoop?.dispose(); seqLoop=null;
     const steps=SEQ.steps;
+    const stepSec16=Tone.Time('16n').toSeconds();
+    const stepSec1n=Tone.Time('1n').toSeconds();
+    const chordBarsVal=()=>+(document.getElementById('chordBars')?.value||2);
     seqLoop=new Tone.Sequence((time,step)=>{
         // Song mode: switch pattern at loop start
-        if(step===0 && SEQ.songMode && SEQ.songArrangement.length>0){
-            const nextName=SEQ.songArrangement[SEQ.songPos%SEQ.songArrangement.length];
-            if(nextName!==SEQ.currentPattern){
+        if(step===0 && SEQ.songMode){
+            let nextName=null;
+            if(SEQ.arrangement && SEQ.arrangement.length>0){
+                // Visual arrangement timeline takes priority
+                const bar=SEQ.songPos;
+                const clip=SEQ.arrangement.find(c=>bar>=c.startBar&&bar<c.startBar+c.lenBars);
+                nextName=clip?.pattern??null;
+                SEQ.songPos++;
+                if(SEQ.songPos>=(SEQ.arrangementBars||32)) SEQ.songPos=0;
+            } else if(SEQ.songArrangement.length>0){
+                // Fallback: old queue-based arrangement
+                nextName=SEQ.songArrangement[SEQ.songPos%SEQ.songArrangement.length];
+                SEQ.songPos++;
+            }
+            if(nextName && nextName!==SEQ.currentPattern){
                 saveCurrentPattern();
                 SEQ.currentPattern=nextName;
                 loadPatternData(nextName);
-                Tone.Draw.schedule(()=>{ buildSeqGrid(); buildPatternBar(); buildSongBar(); },time);
+                Tone.Draw.schedule(()=>{ buildSeqGrid(); buildPatternBar(); buildSongBar(); if(typeof refreshArrangementPlayhead==='function') refreshArrangementPlayhead(); },time);
+            } else {
+                Tone.Draw.schedule(()=>{ if(typeof refreshArrangementPlayhead==='function') refreshArrangementPlayhead(); },time);
             }
-            SEQ.songPos++;
         }
         SEQ.tracks.forEach(track=>{
             if(track.mute) return;
@@ -140,8 +156,10 @@ function buildSeqLoop() {
             const vel=track.vels[step]??100;
             const v=Math.max(0.01,Math.min(1,vel/127));
             const gate=track.gates?.[step]??80;
-            const stepSec=Tone.Time('16n').toSeconds();
-            const gateDur=Math.max(0.01, stepSec * gate / 100);
+            // For pad tracks in melodic mode: gate% of a whole note (4 beats), not a 16th note
+            const gateDur = track.type==='pad' && track.melodic && track.padMode!=='chord'
+                ? Math.max(0.01, stepSec1n * gate / 100)
+                : Math.max(0.01, stepSec16 * gate / 100);
             if(!track.melodic){ if(val) {
                 triggerTrack(track,time,vel);
                 // MIDI out — send GM drum note
@@ -154,7 +172,7 @@ function buildSeqLoop() {
             else if(track.type==='pad') {
                 if(val!==null) {
                     const dur = track.padMode==='chord'
-                        ? Tone.Time('1n').toSeconds() * (+document.getElementById('chordBars').value||2)
+                        ? stepSec1n * chordBarsVal()
                         : gateDur;
                     const notes = track.padMode==='chord' && S.progression[S.currentChord]?.length
                         ? S.progression[S.currentChord].map(midiFreq)
@@ -178,7 +196,16 @@ function buildSeqLoop() {
                 }
             }}
         });
-        Tone.Draw.schedule(()=>{ S.currentSeqStep=step; updateSeqHighlight(step); },time);
+        // Automation — apply per-track parameter values
+        if(typeof applyStepAutomation==='function'){
+            SEQ.tracks.forEach(t=>{ if(t.automation) applyStepAutomation(t,step,time,steps); });
+        }
+        // Chord step sequencer — trigger chord stab on active steps
+        if(!S.chordMute && SEQ.chordSteps?.[step] && S.progression[S.currentChord]?.length) {
+            const chordDur=Math.max(0.05, stepSec16*(SEQ.chordStepGate??0.75));
+            chordSynth?.triggerAttackRelease(S.progression[S.currentChord].map(midiFreq),chordDur,time);
+        }
+        Tone.Draw.schedule(()=>{ S.currentSeqStep=step; updateSeqHighlight(step); updateChordStepHighlight(step); },time);
     },Array.from({length:steps},(_,i)=>i),'16n');
     seqLoop.start(0);
 }

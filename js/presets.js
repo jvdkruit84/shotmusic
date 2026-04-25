@@ -90,10 +90,37 @@ const BASS_PRESETS = {
     atari:   { osc:'square',    env:{attack:.001,decay:.18, sustain:.6, release:.2},
                fe:{base:800,oct:1.5,atk:.001,dec:.1,  sus:.5, rel:.15},
                vol:-6  },
+
+    // ── Meer nieuwe bassgeluiden ──────────────────────────────
+    // Tape — warme, analoge saturated bas (lo-fi / R&B)
+    tape:    { osc:'sawtooth',  env:{attack:.008,decay:.3,  sustain:.65,release:.35},
+               fe:{base:350,oct:2,  atk:.01, dec:.2,  sus:.5, rel:.3},
+               dist:true, vol:-9  },
+
+    // Funk — heldere aanslag, snel uitstervend (funk / soul)
+    funk:    { osc:'triangle',  env:{attack:.003,decay:.15, sustain:.2, release:.12},
+               fe:{base:900,oct:3,  atk:.001,dec:.1,  sus:.1, rel:.1},
+               filter:{Q:4}, vol:-6  },
+
+    // Dub — zware sub met echo-feel (reggae / dub)
+    dub:     { osc:'sine',      env:{attack:.02, decay:.9,  sustain:.5, release:.8},
+               fe:{base:60, oct:1.5,atk:.02, dec:.6,  sus:.4, rel:.5},
+               vol:-3  },
+
+    // Zap — snelle elektro-aanslag, sci-fi (electro / bass music)
+    zap:     { osc:'sawtooth',  env:{attack:.001,decay:.06, sustain:0,  release:.05},
+               fe:{base:2000,oct:6, atk:.001,dec:.05, sus:0,  rel:.04},
+               filter:{Q:8}, vol:-7  },
+
+    // Dirt — grunge, punk, vuile overdrive bas
+    dirt:    { osc:'square',    env:{attack:.005,decay:.3,  sustain:.7, release:.25},
+               fe:{base:400,oct:3,  atk:.002,dec:.2,  sus:.5, rel:.2},
+               dist:true, filter:{Q:3}, vol:-11 },
 };
 
 // Pad synth presets (long attack, slow release)
 const PAD_PRESETS = {
+    // ── Classic ───────────────────────────────────────────────
     warm:    { osc:{type:'amsine2'},                         env:{attack:.8,  decay:.5, sustain:.8, release:2.5}, vol:-12 },
     lush:    { osc:{type:'fatsawtooth',count:3,spread:25},   env:{attack:1.2, decay:.4, sustain:.8, release:3.0}, vol:-15 },
     dark:    { osc:{type:'fattriangle',count:2,spread:10},   env:{attack:1.5, decay:.3, sustain:.9, release:4.0}, vol:-11 },
@@ -101,6 +128,23 @@ const PAD_PRESETS = {
     strings: { osc:{type:'fatsawtooth',count:4,spread:18},   env:{attack:.6,  decay:.2, sustain:.9, release:2.0}, vol:-15 },
     glass:   { osc:{type:'fmsine'},                          env:{attack:.01, decay:2.5,sustain:0,  release:3.0}, vol:-14 },
     choir:   { osc:{type:'amsine3'},                         env:{attack:1.0, decay:.4, sustain:.85,release:3.5}, vol:-14 },
+    // ── New additions ─────────────────────────────────────────
+    // Arctic — icy, hoog frequente shimmer, koud en helder
+    arctic:  { osc:{type:'fatsawtooth',count:3,spread:45},   env:{attack:1.8, decay:.6, sustain:.7, release:5.0}, vol:-16 },
+    // Shimmer — helder evoluerend, goed voor ambient en post-rock
+    shimmer: { osc:{type:'fmsawtooth'},                      env:{attack:1.0, decay:.8, sustain:.75,release:4.0}, vol:-14 },
+    // Drone — statisch, meditatief, minimale beweging
+    drone:   { osc:{type:'fatsawtooth',count:2,spread:5},    env:{attack:3.0, decay:0,  sustain:1.0, release:6.0}, vol:-13 },
+    // Haunted — donker, onheilspellend, horror-sfeer
+    haunted: { osc:{type:'amsine2'},                         env:{attack:2.5, decay:.8, sustain:.6, release:7.0}, vol:-10 },
+    // Cosmic — brede ruimteklank, diepe atmosfeer
+    cosmic:  { osc:{type:'fatsawtooth',count:5,spread:55},   env:{attack:2.0, decay:.5, sustain:.8, release:8.0}, vol:-17 },
+    // Vintage — warme analoge Juno/Jupiter stijl
+    vintage: { osc:{type:'fatsawtooth',count:2,spread:8},    env:{attack:.5,  decay:.3, sustain:.85,release:2.5}, vol:-13 },
+    // Breath — organisch, bijna vocaal, soulvol
+    breath:  { osc:{type:'amsine3'},                         env:{attack:1.4, decay:.6, sustain:.7, release:4.5}, vol:-13 },
+    // Angel — hemelachtig, licht, etherich hoog register
+    angel:   { osc:{type:'fmsine'},                          env:{attack:.8,  decay:.4, sustain:.9, release:3.0}, vol:-15 },
 };
 
 // Hi-hat presets (NoiseSynth + internal highpass filter)
@@ -111,6 +155,19 @@ const HIHAT_PRESETS = {
     crispy:  { noise:'white', hpFreq:12000, env:{attack:.001,decay:.05, sustain:0,   release:.01},  vol:-11 },
     vinyl:   { noise:'pink',  hpFreq:5000,  env:{attack:.001,decay:.14, sustain:0,   release:.05},  vol:-13 },
     brushed: { noise:'pink',  hpFreq:3000,  env:{attack:.005,decay:.22, sustain:.05, release:.14},  vol:-13 },
+};
+
+// Snare presets (NoiseSynth, optioneel + MembraneSynth tooncomponent)
+// tone:true voegt een subtiele MembraneSynth toe voor body
+const SNARE_PRESETS = {
+    acoustic:   { noise:'white', hpFreq:200,  env:{attack:.001,decay:.14, sustain:0,   release:.06}, vol:-8,  tone:true  },
+    electronic: { noise:'white', hpFreq:1000, env:{attack:.001,decay:.10, sustain:0,   release:.04}, vol:-6              },
+    clap:       { noise:'pink',  hpFreq:2000, env:{attack:.005,decay:.09, sustain:0,   release:.06}, vol:-7              },
+    rimshot:    { noise:'brown', hpFreq:500,  env:{attack:.001,decay:.05, sustain:0,   release:.02}, vol:-9,  tone:true  },
+    brushed:    { noise:'pink',  hpFreq:800,  env:{attack:.008,decay:.28, sustain:.04, release:.18}, vol:-12             },
+    big_room:   { noise:'white', hpFreq:300,  env:{attack:.001,decay:.38, sustain:0,   release:.18}, vol:-10             },
+    trap:       { noise:'white', hpFreq:1200, env:{attack:.001,decay:.22, sustain:0,   release:.14}, vol:-7              },
+    vinyl:      { noise:'pink',  hpFreq:600,  env:{attack:.002,decay:.18, sustain:.02, release:.09}, vol:-11             },
 };
 
 // MIDI drum note pools per type
@@ -129,16 +186,24 @@ function makeTrack(type, overrides={}) {
         vels:  Array(32).fill(100),
         probs: Array(32).fill(100),
         gates: Array(32).fill(80),
-        mute:false, sidechain:false, kickType:'classic', bassType:'saw', hihatType:'closed',
+        mute:false, sidechain:false, kickType:'classic', snareType:'acoustic', bassType:'saw', hihatType:'closed',
         padPreset:'warm', padMode:'chord',
         volume:0, pan:0,
         synth:null, extra:null, howl:null, filename:null,
+        sampleUrl:null, samplePlayer:null,
+        samplePack:null, sampleCat:null, sampleFile:null,
         fx:{ rev: (type==='melody'||type==='pad')?.3:0, dly:0, flt:20000, dist:0 }, fxNodes:null,
         lfo:{ enabled:false, target:'filter', rate:2, depth:0.3 }, lfoNode:null,
         // Piano roll — melodic tracks default to pianoroll mode
         pianoRoll: [], editMode: def.melodic ? 'pianoroll' : 'steps', pianoRollBars: 4, part: null,
         // Clip launcher
         activePattern: 'A', queuedPattern: null,
+        // EQ
+        eq: { low:0, mid:0, high:0 },
+        // Bus routing
+        busRoute: null,
+        // Automation
+        automation: null,
         // MIDI output
         midiOut: { enabled: false,
             channel: {kick:10,snare:10,hihat:10,bass:2,melody:3,pad:4,sample:10}[type] || 1,

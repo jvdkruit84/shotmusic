@@ -7,6 +7,26 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
 <link rel="stylesheet" href="css/app.css">
+<script>
+// Resume the Tone.js AudioContext on the very first user gesture.
+// Chrome suspends AudioContexts created before a user interaction;
+// this handler resumes it as soon as the user clicks/taps/keys anything,
+// so it is ready before the Play button is pressed.
+(function () {
+    var _done = false;
+    function _resume() {
+        if (_done) return;
+        _done = true;
+        if (typeof Tone !== 'undefined') Tone.start();
+        document.removeEventListener('click',      _resume, true);
+        document.removeEventListener('keydown',    _resume, true);
+        document.removeEventListener('touchstart', _resume, true);
+    }
+    document.addEventListener('click',      _resume, true);
+    document.addEventListener('keydown',    _resume, true);
+    document.addEventListener('touchstart', _resume, true);
+})();
+</script>
 </head>
 <body>
 
@@ -21,7 +41,8 @@
 <div class="workspace">
 
 <!-- ── Sidebar ── -->
-<div class="sidebar">
+<div class="sidebar" id="leftSidebar">
+<button class="sidebar-fold-btn sidebar-fold-btn-left" id="leftSidebarToggle" title="Sidebar in-/uitklappen">◀</button>
 <div class="sidebar-section">
     <div class="section-label">Synthesizer <button class="section-toggle" title="Inklappen">▾</button></div>
     <div class="section-content">
@@ -159,12 +180,14 @@
 
     <!-- Transport -->
     <div class="transport">
+        <!-- Core: play / stop -->
         <div class="t-group">
             <span class="led" id="playLed"></span>
             <button class="btn btn-play" id="btnPlay">▶ Play</button>
             <button class="btn btn-stop" id="btnStop">■ Stop</button>
         </div>
         <div class="t-divider"></div>
+        <!-- BPM -->
         <div class="t-group">
             <div class="t-stat">
                 <div class="t-display" id="bpmVal">123</div>
@@ -174,11 +197,13 @@
             <button class="tap-btn" id="btnTap" title="Tik op de maat om BPM in te stellen">TAP</button>
         </div>
         <div class="t-divider"></div>
+        <!-- Bars -->
         <div class="inline-ctrl">
             Bars <span id="barVal" style="color:var(--digit);font-weight:700;font-family:monospace;min-width:14px">2</span>
             <input type="range" id="chordBars" min="1" max="8" step="1" value="2" style="width:60px">
         </div>
         <div class="t-divider"></div>
+        <!-- Chord / bar counter -->
         <div class="t-group" style="gap:10px">
             <div class="t-stat">
                 <div class="val" id="currentChordName">—</div>
@@ -189,30 +214,62 @@
                 <div class="lbl">BAR</div>
             </div>
         </div>
-        <div style="margin-left:auto;display:flex;gap:5px;align-items:center">
-            <button class="btn btn-sec btn-undo" id="btnUndo" title="Ongedaan maken (Ctrl+Z)" disabled>↩</button>
-            <button class="btn btn-sec btn-undo" id="btnRedo" title="Opnieuw (Ctrl+Y)" disabled>↪</button>
+
+        <!-- ── Menu bar ── -->
+        <nav class="menubar" id="menubar">
+            <!-- Undo / Redo (always visible, frequently used) -->
+            <button class="btn btn-icon" id="btnUndo" title="Ongedaan maken (Ctrl+Z)" disabled>↩</button>
+            <button class="btn btn-icon" id="btnRedo" title="Opnieuw (Ctrl+Y)" disabled>↪</button>
             <div class="t-divider"></div>
-            <button class="btn btn-sec" id="btnTemplates">✦ Starters</button>
-            <button class="btn btn-save" id="btnSave">💾 Opslaan</button>
-            <button class="btn btn-sec" id="btnLoad">📂 Laden</button>
-            <input type="file" id="loadFileInput" accept=".json" style="display:none">
+            <!-- Launch — always visible -->
+            <button class="btn btn-launch" id="btnLauncher" title="Clip Launcher / Performance Mode">⊟ Launch</button>
             <div class="t-divider"></div>
-            <button class="btn btn-sec" id="btnMixer">⊞ Mixer</button>
-            <button class="btn btn-sec" id="btnLauncher">⊟ Launch</button>
-            <div class="t-divider"></div>
-            <button class="btn btn-sec" id="btnViz">◈ Viz</button>
-            <div class="t-divider"></div>
-            <button class="btn btn-sec" id="btnMidiImport">↑ MIDI</button>
-            <input type="file" id="midiImportInput" accept=".mid,.midi" style="display:none">
-            <button class="btn btn-sec" id="btnMidi">↓ MIDI</button>
-            <button class="btn btn-sec" id="btnMidiOut">⊙ VST</button>
-            <button class="btn btn-sec" id="btnRecStart">● REC</button>
-            <button class="btn btn-sec" id="btnRecStop" disabled>■ STOP</button>
-            <div class="t-divider"></div>
-            <button class="btn btn-danger" id="btnReset" title="Reset project naar standaard">↺ Reset</button>
-            <button class="btn btn-sec btn-help" id="btnHelp" title="Help (F1)">?</button>
-        </div>
+
+            <!-- File -->
+            <div class="menu-item">
+                <div class="menu-hdr">File <span class="menu-arrow">▾</span></div>
+                <div class="menu-drop">
+                    <button class="menu-btn" id="btnTemplates">✦ Starters</button>
+                    <button class="menu-btn menu-btn-save" id="btnSave">💾 Opslaan</button>
+                    <button class="menu-btn" id="btnLoad">📂 Laden</button>
+                    <input type="file" id="loadFileInput" accept=".json" style="display:none">
+                </div>
+            </div>
+
+            <!-- View -->
+            <div class="menu-item">
+                <div class="menu-hdr">View <span class="menu-arrow">▾</span></div>
+                <div class="menu-drop">
+                    <button class="menu-btn" id="btnMixer">⊞ Mixer</button>
+                    <button class="menu-btn" id="btnArrangement">☰ Arrangement</button>
+                    <button class="menu-btn" id="btnViz">◈ Visualizer</button>
+                </div>
+            </div>
+
+            <!-- MIDI / Record -->
+            <div class="menu-item">
+                <div class="menu-hdr">MIDI <span class="menu-arrow">▾</span></div>
+                <div class="menu-drop">
+                    <button class="menu-btn" id="btnMidiImport">↑ MIDI Import</button>
+                    <input type="file" id="midiImportInput" accept=".mid,.midi" style="display:none">
+                    <button class="menu-btn" id="btnMidi">↓ MIDI Export</button>
+                    <button class="menu-btn" id="btnMidiOut">⊙ VST / MIDI Out</button>
+                    <div class="menu-sep"></div>
+                    <button class="menu-btn menu-btn-rec" id="btnRecStart">● Opnemen</button>
+                    <button class="menu-btn" id="btnRecStop" disabled>■ Stop opname</button>
+                </div>
+            </div>
+
+            <!-- Edit / Reset -->
+            <div class="menu-item">
+                <div class="menu-hdr">Edit <span class="menu-arrow">▾</span></div>
+                <div class="menu-drop">
+                    <button class="menu-btn" id="btnReset" title="Reset project naar standaard">↺ Reset project</button>
+                    <div class="menu-sep"></div>
+                    <button class="menu-btn btn-help" id="btnHelp" title="Help (F1)">? Help</button>
+                </div>
+            </div>
+        </nav>
     </div>
 
     <!-- Visualizer -->
@@ -227,18 +284,16 @@
 
     <!-- Chord progression -->
     <div class="progression-area">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:0">
-            <div class="panel-title" style="margin:0">Akkoord Progressie</div>
+        <!-- Single header row: title · mute · vol · divider · arp -->
+        <div class="prog-header">
+            <span class="prog-title">Akkoorden</span>
             <button class="seq-mute-btn" id="chordMuteBtn" title="Mute akkoorden">M</button>
-            <label style="display:flex;align-items:center;gap:4px;font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">
-                VOL
-                <input type="range" id="chordVolume" min="-40" max="6" step="1" value="0" style="width:80px">
-                <span id="chordVolumeVal" style="min-width:28px">0dB</span>
+            <div class="t-divider" style="height:16px"></div>
+            <label class="prog-vol">
+                Vol <input type="range" id="chordVolume" min="-40" max="6" step="1" value="0">
+                <span id="chordVolumeVal">0dB</span>
             </label>
-        </div>
-        <div class="chord-grid" id="chordGrid"><span style="color:var(--muted);font-size:12px">Laden…</span></div>
-        <!-- Arpeggiator -->
-        <div class="arp-bar">
+            <div class="t-divider" style="height:16px"></div>
             <button class="arp-toggle" id="arpToggle" title="Arpeggiator aan/uit">ARP</button>
             <div class="arp-controls hidden" id="arpControls">
                 <label class="arp-lbl">Mode
@@ -259,7 +314,7 @@
                         <option value="8t">1/8T</option>
                     </select>
                 </label>
-                <label class="arp-lbl">Octaven
+                <label class="arp-lbl">Oct
                     <select id="arpOctaves" class="arp-sel">
                         <option value="1" selected>1</option>
                         <option value="2">2</option>
@@ -267,42 +322,43 @@
                     </select>
                 </label>
                 <label class="arp-lbl">Gate
-                    <input type="range" id="arpGate" min="0.05" max="1" step="0.05" value="0.5" style="width:70px">
+                    <input type="range" id="arpGate" min="0.05" max="1" step="0.05" value="0.5" style="width:60px">
                     <span id="arpGateVal">50%</span>
                 </label>
             </div>
         </div>
+        <div class="chord-grid" id="chordGrid"><span style="color:var(--muted);font-size:12px">Laden…</span></div>
     </div>
 
     <!-- Step Sequencer -->
     <div class="seq-area">
-        <!-- Pattern bar -->
-        <div class="pattern-bar" id="patternBar">
-            <span style="font-size:7.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--muted);flex-shrink:0">Patroon</span>
-            <div id="patBtns" style="display:flex;gap:3px"></div>
-            <div class="pat-sep"></div>
-            <button class="pat-copy" id="btnPatCopy" title="Kopieer huidig patroon naar…">Kopieer →</button>
-            <select id="patCopyTarget" style="height:22px;font-size:9px;background:var(--panel);border:1px solid var(--border2);color:var(--text);border-radius:3px;padding:0 4px"></select>
-        </div>
-        <div class="seq-toolbar">
-            <span class="panel-title" style="margin:0">Step Sequencer</span>
+        <!-- Single combined toolbar: patterns + sequencer controls -->
+        <div class="seq-toolbar" id="patternBar">
+            <!-- Pattern buttons -->
+            <div id="patBtns" style="display:flex;gap:2px;flex-shrink:0"></div>
+            <button class="pat-copy" id="btnPatCopy" title="Kopieer huidig patroon naar…">→</button>
+            <select id="patCopyTarget" style="height:22px;font-size:9px;background:var(--card);border:1px solid var(--border2);color:var(--text);border-radius:3px;padding:0 4px;max-width:44px"></select>
+            <div class="t-divider"></div>
+            <!-- Sequencer actions -->
             <button class="seq-ctrl-btn" id="seqDefault">Default</button>
             <button class="seq-ctrl-btn" id="seqClear">Clear</button>
             <button class="seq-ctrl-btn" id="seqRandom">Random</button>
             <button class="seq-ctrl-btn seq-ctrl-mute" id="btnMuteAll" title="Mute / unmute alle tracks">Mute All</button>
-            <button class="seq-ctrl-btn" id="btnMelGen">✦ Melodie</button>
+            <div class="t-divider"></div>
+            <!-- Settings -->
             <div class="inline-ctrl">
-                Stappen
-                <select id="seqStepCount" style="width:60px">
-                    <option value="16" selected>16</option>
-                    <option value="32">32</option>
+                <select id="seqStepCount" style="width:52px">
+                    <option value="16" selected>16 st</option>
+                    <option value="32">32 st</option>
                 </select>
             </div>
             <div class="inline-ctrl">
-                Swing <span id="seqSwingVal" style="color:var(--accent);font-weight:700;min-width:22px">0%</span>
-                <input type="range" id="seqSwing" min="0" max="0.5" step="0.01" value="0" style="width:60px">
+                <span style="color:var(--muted)">Swing</span>
+                <input type="range" id="seqSwing" min="0" max="0.5" step="0.01" value="0" style="width:55px">
+                <span id="seqSwingVal" style="color:var(--accent);font-weight:700;min-width:22px">0%</span>
             </div>
-            <span style="font-size:10px;color:var(--muted);margin-left:4px">Rechts-klik stap = opties</span>
+            <div class="t-divider"></div>
+            <button class="seq-ctrl-btn" id="btnMelGen">✦ Melodie</button>
         </div>
 
         <!-- Melody generator panel -->
@@ -411,8 +467,9 @@
     </div>
 
     <!-- Piano -->
-    <div class="piano-area">
+    <div class="piano-area collapsed" id="pianoArea">
         <div class="piano-header">
+            <button class="piano-fold-btn" id="pianoFoldBtn" title="Keyboard in-/uitklappen">▾</button>
             <span class="piano-lbl">Keyboard</span>
             <select id="kbdRecTrack" class="kbd-rec-sel" title="Live opnemen in track">
                 <option value="">Geen opname</option>
@@ -493,6 +550,31 @@
     <!-- Launcher / Performance panel -->
     <div class="launcher-panel" id="launcherPanel"></div>
 
+    <!-- Arrangement Timeline panel -->
+    <div class="arr-panel" id="arrangementPanel">
+        <div class="arr-toolbar">
+            <span class="arr-title">ARRANGEMENT TIMELINE</span>
+            <label class="arr-ctrl-label">Bars
+                <select id="arrBarsSelect" class="arr-select">
+                    <option value="16">16</option>
+                    <option value="32" selected>32</option>
+                    <option value="64">64</option>
+                    <option value="128">128</option>
+                </select>
+            </label>
+            <button class="arr-zoom-btn" id="btnArrZoomOut" title="Zoom uit">−</button>
+            <button class="arr-zoom-btn" id="btnArrZoomIn" title="Zoom in">+</button>
+            <span class="arr-hint">Klik = nieuw clip &nbsp;·&nbsp; Drag = verplaats &nbsp;·&nbsp; Drag rechts = resize &nbsp;·&nbsp; Rechts-klik = verwijder &nbsp;·&nbsp; Ctrl+Scroll = zoom</span>
+            <button class="arr-zoom-btn" style="margin-left:auto" onclick="openArrangement()">×</button>
+        </div>
+        <div class="arr-body">
+            <div class="arr-pat-labels" id="arrPatLabels"></div>
+            <div class="arr-canvas-wrap" id="arrCanvasWrap">
+                <canvas id="arrCanvas"></canvas>
+            </div>
+        </div>
+    </div>
+
     <!-- Mixer panel -->
     <div class="mixer-panel" id="mixerPanel">
         <div class="mixer-header">
@@ -505,7 +587,8 @@
 </div>
 
 <!-- ── Right sidebar ── -->
-<div class="sidebar right-sidebar">
+<div class="sidebar right-sidebar" id="rightSidebar">
+<button class="sidebar-fold-btn sidebar-fold-btn-right" id="rightSidebarToggle" title="Sidebar in-/uitklappen">▶</button>
 
     <!-- Muziek Theorie -->
     <div class="sidebar-section">
@@ -667,9 +750,28 @@
 </div>
 </div>
 
+<!-- Sample Browser Modal -->
+<div id="sampleBrowserModal" class="modal-overlay">
+  <div class="modal-box sb-modal">
+    <div class="modal-header">
+      <span>Sample Browser — <strong id="sbTrackLabel"></strong></span>
+      <div class="sb-toolbar">
+        <input type="text" id="sbSearch" class="sb-search" placeholder="Zoeken…">
+        <button class="btn btn-sec" id="sbRefresh" title="Packs herladen">↺</button>
+        <button class="btn btn-sec" id="sbClearSample" title="Synth herstellen">Synth</button>
+      </div>
+      <button class="modal-close" id="sbClose">×</button>
+    </div>
+    <div class="sb-body">
+      <div class="sb-sidebar" id="sbSidebar"></div>
+      <div class="sb-files-pane" id="sbFiles"></div>
+    </div>
+  </div>
+</div>
+
 <script src="js/state.js"></script>
 <script src="js/presets.js"></script>
-<script src="js/synth.js"></script>
+<script src="js/synth.js?v=5"></script>
 <script src="js/sequencer.js"></script>
 <script src="js/arp.js"></script>
 <script src="js/mixer.js"></script>
@@ -683,8 +785,13 @@
 <script src="js/templates.js"></script>
 <script src="js/pianoroll.js"></script>
 <script src="js/launcher.js"></script>
+<script src="js/buses.js"></script>
+<script src="js/arrangement.js"></script>
+<script src="js/automation.js"></script>
+<script src="js/midi_learn.js"></script>
 <script src="js/midi_import.js"></script>
 <script src="js/midi_out.js"></script>
+<script src="js/sampler.js?v=5"></script>
 <script src="js/help.js"></script>
 <script src="js/splash.js"></script>
 </body>

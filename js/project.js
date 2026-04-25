@@ -44,6 +44,11 @@ function collectProjectData() {
         currentPattern: SEQ.currentPattern,
         songArrangement:SEQ.songArrangement,
         songMode:       SEQ.songMode,
+        arrangement:    JSON.parse(JSON.stringify(SEQ.arrangement||[])),
+        arrangementBars:SEQ.arrangementBars||32,
+        chordSteps:     [...(SEQ.chordSteps||Array(32).fill(0))],
+        chordStepGate:  SEQ.chordStepGate??0.75,
+        busState:       JSON.parse(JSON.stringify(window.BUS_STATE||{})),
         progression:    S.progression,
         chordNames:     S.chordNames,
         scale:          S.scale,
@@ -54,10 +59,14 @@ function collectProjectData() {
             label:    t.label,
             mute:     t.mute,
             kickType:  t.kickType,
+            snareType: t.snareType,
             hihatType: t.hihatType,
             bassType:  t.bassType,
             padPreset: t.padPreset,
             padMode:   t.padMode,
+            samplePack: t.samplePack ?? null,
+            sampleCat:  t.sampleCat  ?? null,
+            sampleFile: t.sampleFile ?? null,
             volume:   t.volume,
             pan:      t.pan,
             fx:       {...t.fx},
@@ -73,6 +82,9 @@ function collectProjectData() {
             pianoRollBars: t.pianoRollBars ?? 4,
             activePattern: t.activePattern ?? 'A',
             midiOut:    t.midiOut ?? { enabled:false, channel:1, drumNote:null },
+            automation: t.automation ?? null,
+            eq:        t.eq ?? {low:0,mid:0,high:0},
+            busRoute:  t.busRoute ?? null,
         })),
     };
 }
@@ -147,6 +159,17 @@ async function loadProjectData(data, opts={}) {
     SEQ.songArrangement = data.songArrangement ?? [];
     SEQ.songMode        = data.songMode ?? false;
     SEQ.songPos         = 0;
+    SEQ.arrangement     = data.arrangement ?? [];
+    SEQ.arrangementBars = data.arrangementBars ?? 32;
+    SEQ.chordSteps      = data.chordSteps ?? Array(32).fill(0);
+    SEQ.chordStepGate   = data.chordStepGate ?? 0.75;
+    if(data.busState && window.BUS_STATE) Object.assign(window.BUS_STATE, data.busState);
+    // Sync arrBarsSelect if open
+    const absEl = document.getElementById('arrBarsSelect');
+    if(absEl) absEl.value = SEQ.arrangementBars;
+    if(window.ARR && data.arrangement?.length) {
+        ARR.nextId = Math.max(...data.arrangement.map(c=>c.id), 0) + 1;
+    }
     S.progression = data.progression ?? [];
     S.chordNames  = data.chordNames  ?? [];
     S.scale       = data.scale       ?? [];
@@ -182,6 +205,7 @@ async function loadProjectData(data, opts={}) {
             mute:     td.mute ?? false,
             sidechain: td.sidechain ?? false,
             kickType:  td.kickType  ?? 'classic',
+            snareType: td.snareType ?? 'acoustic',
             hihatType: td.hihatType ?? 'closed',
             bassType:  td.bassType  ?? 'saw',
             padPreset: td.padPreset ?? 'warm',
@@ -191,6 +215,10 @@ async function loadProjectData(data, opts={}) {
             fx:       Object.assign({rev:0,dly:0,flt:20000,dist:0}, td.fx??{}),
             fxNodes:  null,
             synth:    null, extra:null, howl:null, filename:td.filename??null,
+            samplePack: td.samplePack ?? null,
+            sampleCat:  td.sampleCat  ?? null,
+            sampleFile: td.sampleFile ?? null,
+            sampleUrl:  null, samplePlayer: null,
             editMode:   td.editMode ?? 'steps',
             pianoRoll:  td.pianoRoll ?? [],
             pianoRollBars: td.pianoRollBars ?? 4,
@@ -198,6 +226,9 @@ async function loadProjectData(data, opts={}) {
             activePattern: td.activePattern ?? 'A',
             queuedPattern: null,
             midiOut: td.midiOut ?? { enabled:false, channel:1, drumNote:null },
+            automation: td.automation ?? null,
+            eq:        td.eq ?? {low:0,mid:0,high:0},
+            busRoute:  td.busRoute ?? null,
         };
         SEQ.tracks.push(t);
     });
@@ -292,6 +323,43 @@ function exportMidi() {
     const midi=new Uint8Array([...header,...midiTracks.flat()]);
     downloadBlob(new Blob([midi],{type:'audio/midi'}),'shotmusic.mid');
     setStatus(`MIDI geëxporteerd (${midiTracks.length-1} tracks)!`,'ok');
+}
+
+// ── Stem export ─────────────────────────────────────────────
+async function exportStems() {
+    const bars = parseInt(prompt('Hoeveel bars opnemen per stem?', '8'));
+    if (!bars || bars < 1 || bars > 64) return;
+    await startAudio();
+    const bpm = Tone.getTransport().bpm.value;
+    const barMs = (60000 / bpm) * 4;
+    const recMs = bars * barMs + 500;
+    const origMutes = SEQ.tracks.map(t => t.mute);
+    const wasPlaying = S.isPlaying;
+
+    setStatus('Stems exporteren…');
+    for (let i = 0; i < SEQ.tracks.length; i++) {
+        const track = SEQ.tracks[i];
+        // Mute all except this track
+        SEQ.tracks.forEach((t, j) => { t.mute = j !== i; });
+        if (S.isPlaying) stopPlayback();
+
+        const rec = new Tone.Recorder();
+        Tone.getDestination().connect(rec);
+        startPlayback();
+        await new Promise(r => setTimeout(r, 300)); // warm-up
+        await rec.start();
+        await new Promise(r => setTimeout(r, recMs));
+        const blob = await rec.stop();
+        rec.dispose();
+        stopPlayback();
+        const safeName = track.label.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        downloadBlob(blob, `stem_${String(i+1).padStart(2,'0')}_${safeName}.webm`);
+        await new Promise(r => setTimeout(r, 400));
+    }
+    // Restore
+    SEQ.tracks.forEach((t, i) => { t.mute = origMutes[i]; });
+    if (wasPlaying) startPlayback();
+    setStatus(`${SEQ.tracks.length} stems geëxporteerd ✓`, 'ok');
 }
 
 // ── Recording ───────────────────────────────────────────────

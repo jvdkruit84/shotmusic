@@ -4,6 +4,40 @@ function updateMgTrackList() {
     const mel=SEQ.tracks.filter(t=>t.melodic);
     if(!mel.length){ sel.innerHTML='<option value="">Geen melodie-track</option>'; return; }
     mel.forEach(t=>{ const o=document.createElement('option'); o.value=t.uid; o.textContent=t.label; sel.appendChild(o); });
+    // Auto-select first track and apply defaults
+    if(mel.length) applyTrackTypeDefaults(mel[0]);
+    sel.addEventListener('change', ()=>{
+        const t=SEQ.tracks.find(t=>t.uid===+sel.value);
+        if(t) applyTrackTypeDefaults(t);
+    });
+}
+
+// ── Auto-set UI defaults per track type ───────────────────
+function applyTrackTypeDefaults(track) {
+    const set = (id, val) => { const el=document.getElementById(id); if(el) el.value=val; };
+    if (track.type === 'pad') {
+        set('mgStyle','arpeggio');
+        set('mgRhythm','sparse_beat');
+        set('mgDensity','sparse');
+        set('mgContour','arch');
+        set('mgOctave','mid');
+        set('mgChordAffinity','only');
+    } else if (track.type === 'bass') {
+        set('mgStyle','stepwise');
+        set('mgRhythm','syncopated');
+        set('mgDensity','medium');
+        set('mgContour','flat');
+        set('mgOctave','low');
+        set('mgChordAffinity','low');
+    } else {
+        // melody / default
+        set('mgStyle','stepwise');
+        set('mgRhythm','straight');
+        set('mgDensity','medium');
+        set('mgContour','arch');
+        set('mgOctave','mid');
+        set('mgChordAffinity','mid');
+    }
 }
 
 function generateMelody() {
@@ -12,16 +46,32 @@ function generateMelody() {
     if(!track||!track.melodic){ setStatus('Kies eerst een melodie-track','err'); return; }
     if(!S.scale.length){ setStatus('Laad eerst een toonladder','err'); return; }
 
-    const style         = document.getElementById('mgStyle').value;
-    const rhythmStyle   = document.getElementById('mgRhythm').value;
-    const density       = document.getElementById('mgDensity').value;
-    const contour       = document.getElementById('mgContour').value;
-    const octave        = document.getElementById('mgOctave').value;
-    const chordAffinity = document.getElementById('mgChordAffinity').value;
-    const arpDir        = document.getElementById('mgArpDir').value;
-    const motifLen      = +document.getElementById('mgMotifLen').value;
-    const variation     = document.getElementById('mgVariation').value;
-    const steps         = SEQ.steps;
+    const trackType = track.type; // 'bass' | 'melody' | 'pad'
+
+    let style         = document.getElementById('mgStyle').value;
+    let rhythmStyle   = document.getElementById('mgRhythm').value;
+    let density       = document.getElementById('mgDensity').value;
+    let contour       = document.getElementById('mgContour').value;
+    let octave        = document.getElementById('mgOctave').value;
+    let chordAffinity = document.getElementById('mgChordAffinity').value;
+    const arpDir      = document.getElementById('mgArpDir').value;
+    const motifLen    = +document.getElementById('mgMotifLen').value;
+    const variation   = document.getElementById('mgVariation').value;
+    const steps       = SEQ.steps;
+
+    // ── Type-specific overrides (hard rules, not suggestions) ──
+    if (trackType === 'pad') {
+        // Pads: always sparse chord tones, never dense/chromatic lines
+        if (density === 'dense') density = 'medium';
+        rhythmStyle = 'sparse_beat'; // only on quarter note beats
+        chordAffinity = 'only';      // strictly chord tones
+        if (octave === 'low') octave = 'mid'; // pads don't sit in bass range
+    } else if (trackType === 'bass') {
+        // Bass: always low, don't clash with melody range
+        if (octave === 'high') octave = 'mid';
+        if (octave === 'mid')  octave = 'low';
+        if (density === 'sparse') density = 'medium'; // bass lines need movement
+    }
 
     // Build note pool for this range
     let lo, hi;
@@ -103,6 +153,14 @@ function generateMelody() {
     if(style==='hook'||style==='sequence'){
         const tiled = buildMotif(pool, rhythm, contourMap, steps, chordTonesAtStep, motifLen, variation);
         track.steps = tiled.concat(Array(32-steps).fill(null)).slice(0,32);
+        if (!track.gates || track.gates.length < 32) track.gates = Array(32).fill(80);
+        if (trackType === 'pad') {
+            for (let i = 0; i < steps; i++) { if (track.steps[i] !== null) track.gates[i] = 99; }
+        } else if (trackType === 'bass') {
+            for (let i = 0; i < steps; i++) { if (track.steps[i] !== null) track.gates[i] = 35 + Math.floor(Math.random() * 35); }
+        } else {
+            for (let i = 0; i < steps; i++) { if (track.steps[i] !== null) track.gates[i] = 55 + Math.floor(Math.random() * 40); }
+        }
         buildSeqGrid(); if(S.isPlaying) buildSeqLoop();
         setStatus(`Melodie gegenereerd (${style}, motief ${motifLen})`, 'ok'); return;
     }
@@ -183,6 +241,23 @@ function generateMelody() {
     }
 
     track.steps = notes.concat(Array(32-steps).fill(null)).slice(0,32);
+
+    // Type-specific gate values (nootlengte)
+    if (!track.gates || track.gates.length < 32) track.gates = Array(32).fill(80);
+    if (trackType === 'pad') {
+        for (let i = 0; i < steps; i++) {
+            if (track.steps[i] !== null) track.gates[i] = 99;
+        }
+    } else if (trackType === 'bass') {
+        for (let i = 0; i < steps; i++) {
+            if (track.steps[i] !== null) track.gates[i] = 35 + Math.floor(Math.random() * 35);
+        }
+    } else {
+        for (let i = 0; i < steps; i++) {
+            if (track.steps[i] !== null) track.gates[i] = 55 + Math.floor(Math.random() * 40);
+        }
+    }
+
     buildSeqGrid();
     if(S.isPlaying) buildSeqLoop();
     setStatus(`Melodie gegenereerd (${style}, ${rhythmStyle})`, 'ok');

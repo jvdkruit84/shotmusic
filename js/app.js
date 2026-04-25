@@ -141,11 +141,234 @@ function setDefaultPattern() {
     buildSeqGrid();
 }
 function clearPattern()  { SEQ.tracks.forEach(t=>t.steps=Array(32).fill(t.melodic?null:0)); buildSeqGrid(); }
-function randomPattern() {
-    SEQ.tracks.forEach(track=>{
-        if(!track.melodic) { track.steps=Array(32).fill(0).map(()=>Math.random()<(track.type==='kick'?.25:track.type==='snare'?.15:.35)?1:0); }
-        else { const ns=getScaleNotes(track.type); track.steps=Array(32).fill(null).map(()=>Math.random()<.2?ns[Math.floor(Math.random()*ns.length)]??null:null); }
+// ── Music-theory-aware random pattern generators ─────────────
+function _pick(arr) { return arr[Math.floor(Math.random()*arr.length)]; }
+function _r()       { return Math.random(); }
+
+function _rndKick(steps, bpm) {
+    steps.fill(0);
+    const templates = bpm < 100
+        ? [ [0,12],[0,8],[0,16],[0,24] ]                                // slow / half-time
+        : bpm < 140
+        ? [ [0,8,16,24],[0,8,16,24],[0,12,16,24],[0,8,20,24],          // mid 4-on-floor variants
+            [0,8,16,24,28],[0,10,16,24] ]
+        : [ [0,6,12,16,24],[0,8,16,22,24],[0,4,8,16,24,28] ];          // fast / busy
+    const base = _pick(templates);
+    base.forEach(i=>{ if(i<32) steps[i]=1; });
+    // optional ghost at odd 16th
+    if(_r()<.35 && bpm>=100) {
+        const ghost = [2,6,10,14,18,22,26,30].filter(i=>steps[i]===0);
+        if(ghost.length) steps[_pick(ghost)]=1;
+    }
+}
+
+function _rndSnare(steps, bpm) {
+    steps.fill(0);
+    if(bpm>130 && _r()<.4) {
+        // half-time feel: snare on beat 3 only (step 16)
+        steps[16]=1;
+    } else {
+        steps[8]=1; steps[24]=1;   // classic 2 & 4
+    }
+    // 0-2 ghost notes
+    const ghosts = [2,4,6,10,12,14,18,20,22,26,28,30].filter(i=>steps[i]===0);
+    const ghostCount = Math.floor(_r()*3);
+    for(let g=0;g<ghostCount&&ghosts.length;g++) {
+        const idx=Math.floor(_r()*ghosts.length);
+        steps[ghosts.splice(idx,1)[0]]=1;
+    }
+}
+
+function _rndHihat(steps, bpm) {
+    steps.fill(0);
+    const style = _r();
+    if(style<.33 || bpm<100) {
+        // 8th notes (every other 16th)
+        for(let i=0;i<32;i+=2) steps[i]=1;
+    } else if(style<.66) {
+        // 16th notes
+        for(let i=0;i<32;i++) steps[i]=1;
+    } else {
+        // offbeat 8ths
+        for(let i=1;i<32;i+=2) steps[i]=1;
+    }
+    // velocity accents on beat 1 & 3 (steps 0 and 16) handled by vel array elsewhere
+    // thin out some hits for variation
+    const thin = Math.floor(_r()*4);
+    for(let t=0;t<thin;t++) {
+        const candidates=[...Array(32).keys()].filter(i=>steps[i]&&i!==0&&i!==16);
+        if(candidates.length) steps[_pick(candidates)]=0;
+    }
+}
+
+function _rndSample(steps) {
+    steps.fill(0);
+    // sparse accent pattern: 1-3 hits
+    const pool = [0,4,8,12,16,20,24,28,2,6,10,14,18,22,26,30];
+    const count = 1+Math.floor(_r()*3);
+    for(let c=0;c<count;c++) {
+        if(pool.length) steps[pool.splice(Math.floor(_r()*pool.length),1)[0]]=1;
+    }
+}
+
+function _chordTones() {
+    // Returns MIDI note numbers for root, fifth, third of current chord
+    const chord = (typeof S!=='undefined' && S.progression && S.progression[S.currentChord]) ? S.progression[S.currentChord] : [];
+    if(chord.length>=3) return chord.slice(0,3);        // root, third, fifth
+    if(chord.length>0)  return chord;
+    // fallback: use first 3 notes of scale
+    return (typeof S!=='undefined' && S.scale) ? S.scale.slice(0,3) : [36,40,43];
+}
+
+function _scaleNotes(type) {
+    if(typeof getScaleNotes==='function') return getScaleNotes(type);
+    return (typeof S!=='undefined' && S.scale) ? S.scale : [36,38,40,41,43,45,47,48];
+}
+
+function _rndBass(steps, bpm) {
+    steps.fill(null);
+    const chord = _chordTones();
+    // Filter chord tones to bass range MIDI 28-52
+    const bassRange = chord.map(n=>{ let m=n%12; let oct=2; return m+oct*12+24; }).filter(n=>n>=24&&n<=55);
+    const scaleNotes = _scaleNotes('bass').filter(n=>n>=24&&n<=55);
+    const pool = bassRange.length ? bassRange : scaleNotes;
+    const root = pool[0];
+    const fifth = pool.find(n=>(n-root)%12===7) ?? pool[Math.min(1,pool.length-1)];
+
+    const style = _r();
+    if(style<.3 || bpm<100) {
+        // root on beat 1, optional fifth on beat 3
+        steps[0]=root;
+        if(_r()<.6) steps[16]=fifth;
+        if(_r()<.3) steps[24]=pool[Math.floor(_r()*pool.length)];
+    } else if(style<.6) {
+        // syncopated: hits on beats 0,6,8,14,16,24
+        const hits = [0,8,16,24];
+        const synco = [6,14,22,30];
+        hits.forEach(i=>{ if(_r()<.75) steps[i]=_pick(pool); });
+        synco.forEach(i=>{ if(_r()<.3)  steps[i]=_pick(pool); });
+        if(!steps[0]) steps[0]=root;
+    } else {
+        // walking / groove: root note with 4-6 hits
+        const positions=[0,4,8,10,12,16,18,20,24,28,30];
+        const count=4+Math.floor(_r()*3);
+        const chosen=[];
+        while(chosen.length<count&&chosen.length<positions.length){
+            const p=positions[Math.floor(_r()*positions.length)];
+            if(!chosen.includes(p)) chosen.push(p);
+        }
+        chosen.forEach(i=>steps[i]=_pick(pool));
+        steps[0]=root;   // always anchor on 1
+    }
+}
+
+function _melRhythm(count, bpm) {
+    // Generate 'count' rhythmic positions (0-31), grid-snapped
+    const grid = bpm<100 ? [0,4,8,12,16,20,24,28] : [0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30];
+    const positions = [...grid];
+    const chosen = [];
+    while(chosen.length<count && positions.length) {
+        const idx=Math.floor(_r()*positions.length);
+        chosen.push(positions.splice(idx,1)[0]);
+    }
+    return chosen.sort((a,b)=>a-b);
+}
+
+function _rndMelody(steps, bpm) {
+    steps.fill(null);
+    const chord = _chordTones();
+    const scale = _scaleNotes('melody');
+    const count = 3+Math.floor(_r()*5);   // 3-7 notes
+    const positions = _melRhythm(count, bpm);
+    // contour: up / down / arch / wave / static
+    const contour = _pick(['up','down','arch','wave','static']);
+    positions.forEach((pos,idx)=>{
+        const useChord = _r()<.6;
+        const pool = useChord ? chord : scale;
+        if(!pool.length) { steps[pos]=scale[0]??60; return; }
+        let note;
+        if(contour==='up')     note=pool[Math.min(idx, pool.length-1)];
+        else if(contour==='down') note=pool[Math.max(0, pool.length-1-idx)];
+        else if(contour==='arch') {
+            const mid=Math.floor(positions.length/2);
+            const i=idx<=mid ? idx : positions.length-1-idx;
+            note=pool[Math.min(i,pool.length-1)];
+        } else note=_pick(pool);
+        steps[pos]=note ?? _pick(scale);
     });
+}
+
+function _rndPad(steps) {
+    steps.fill(null);
+    const chord = _chordTones();
+    const scale = _scaleNotes('pad');
+    const pool = chord.length ? chord : scale;
+    // 1-3 chord hits: beat 1 always, optionally beat 3
+    steps[0] = _pick(pool);
+    if(_r()<.5) steps[16] = _pick(pool);
+    if(_r()<.3) steps[24] = _pick(pool);
+}
+
+function _rndPreset(track) {
+    switch(track.type) {
+        case 'kick':
+            track.kickType = _pick(Object.keys(KICK_PRESETS));
+            break;
+        case 'snare':
+            track.snareType = _pick(Object.keys(SNARE_PRESETS));
+            break;
+        case 'hihat':
+            track.hihatType = _pick(Object.keys(HIHAT_PRESETS));
+            break;
+        case 'bass':
+            track.bassType = _pick(Object.keys(BASS_PRESETS));
+            break;
+        case 'pad':
+            track.padPreset = _pick(Object.keys(PAD_PRESETS));
+            break;
+    }
+    if(typeof buildTrackSynth === 'function' && S.audioReady) buildTrackSynth(track);
+}
+
+function _rndGlobalPreset() {
+    // Randomize chord synth preset (global)
+    const chordKeys = Object.keys(CHORD_PRESETS);
+    const chordSel = document.getElementById('chordPreset');
+    if(chordSel) {
+        chordSel.value = _pick(chordKeys);
+        if(typeof buildChordSynth === 'function' && S.audioReady) buildChordSynth(chordSel.value);
+    }
+    // Randomize melody synth preset (global)
+    const pianoSel = document.getElementById('pianoSound');
+    if(pianoSel) {
+        pianoSel.value = _pick(chordKeys);
+        // rebuild melody track synth
+        SEQ.tracks.filter(t=>t.type==='melody').forEach(t=>{
+            if(typeof buildTrackSynth === 'function' && S.audioReady) buildTrackSynth(t);
+        });
+    }
+}
+
+function randomPattern() {
+    const bpm = Tone.getTransport().bpm.value || 120;
+    SEQ.tracks.forEach(track=>{
+        const s = track.steps;
+        // randomize preset first, then pattern
+        _rndPreset(track);
+        switch(track.type) {
+            case 'kick':   _rndKick(s, bpm);   break;
+            case 'snare':  _rndSnare(s, bpm);  break;
+            case 'hihat':  _rndHihat(s, bpm);  break;
+            case 'sample': _rndSample(s);       break;
+            case 'bass':   _rndBass(s, bpm);   break;
+            case 'melody': _rndMelody(s, bpm); break;
+            case 'pad':    _rndPad(s);          break;
+            default:
+                if(track.melodic) _rndMelody(s, bpm);
+                else _rndSample(s);
+        }
+    });
+    _rndGlobalPreset();
     buildSeqGrid();
 }
 
@@ -241,6 +464,11 @@ document.getElementById('btnMuteAll').addEventListener('click', () => {
     SEQ.tracks.forEach(t => {
         t.mute = !allMuted;
         document.querySelector(`.seq-mute-btn[data-uid="${t.uid}"]`)?.classList.toggle('muted', t.mute);
+        // Stop any currently playing notes immediately when muting
+        if (t.mute) {
+            try { t.synth?.releaseAll?.(); } catch(e) {}
+            try { t.synth?.triggerRelease?.(); } catch(e) {}
+        }
     });
     btn.classList.toggle('active', !allMuted);
     btn.textContent = allMuted ? 'Mute All' : 'Unmute All';
@@ -497,4 +725,59 @@ document.querySelectorAll('.section-toggle').forEach(btn => {
     });
 });
 
+// ── Menu bar ─────────────────────────────────────────────────
+(function initMenubar() {
+    const items = document.querySelectorAll('#menubar .menu-item');
+
+    items.forEach(item => {
+        item.querySelector('.menu-hdr').addEventListener('click', e => {
+            const isOpen = item.classList.contains('open');
+            items.forEach(i => i.classList.remove('open'));
+            if (!isOpen) item.classList.add('open');
+            e.stopPropagation();
+        });
+    });
+
+    // Close menus when a menu button is clicked
+    document.querySelectorAll('.menu-drop .menu-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            items.forEach(i => i.classList.remove('open'));
+        });
+    });
+
+    // Close on outside click
+    document.addEventListener('click', () => {
+        items.forEach(i => i.classList.remove('open'));
+    });
+})();
+
+// ── Sidebar fold/unfold ───────────────────────────────────────
+document.getElementById('leftSidebarToggle')?.addEventListener('click', () => {
+    document.getElementById('leftSidebar').classList.toggle('collapsed');
+});
+document.getElementById('rightSidebarToggle')?.addEventListener('click', () => {
+    document.getElementById('rightSidebar').classList.toggle('collapsed');
+});
+
+// ── Piano keyboard fold/unfold ────────────────────────────────
+document.getElementById('pianoFoldBtn')?.addEventListener('click', () => {
+    document.getElementById('pianoArea').classList.toggle('collapsed');
+});
+
 initHistory();
+
+// ── VU-meter animatielus ──────────────────────────────────────
+(function vuLoop() {
+    SEQ.tracks.forEach(track => {
+        const fill = document.querySelector(`.seq-vu-fill[data-uid="${track.uid}"]`);
+        if (!fill || !track.meterNode) return;
+        const db = track.meterNode.getValue();
+        if (typeof db !== 'number' || !isFinite(db)) return;
+        const pct = Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+        fill.style.height = pct + '%';
+        if (db > -6)       fill.style.background = '#ef4444';
+        else if (db > -18) fill.style.background = '#f59f00';
+        else               fill.style.background = '#22c55e';
+    });
+    requestAnimationFrame(vuLoop);
+})();

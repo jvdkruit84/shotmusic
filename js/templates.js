@@ -746,6 +746,122 @@ const BUILTIN_TEMPLATES = [
         }
     },
 
+    // ── 9. Cinematic Deep House ───────────────────────────────
+    // A minor · 123 BPM · swing · anyma-stijl · extended akkoorden · sub bas
+    // Gebaseerd op: Anyma, Nils Hoffmann, Ben Böhmer, Lane 8, Worakls
+    // Kenmerken: 4-on-floor + off-beat hats, sub bass, Am9/Fmaj9/Gmaj7/E7,
+    //            lush pad, emotionele melodie, sidechain pump, reverb-space
+    {
+        id: 'cinematic_deep_house',
+        name: 'Cinematic Deep House',
+        icon: '◑',
+        bpm: 123,
+        key: 'A Minor',
+        description: 'Filmisch & emotioneel — lush pads, extended jazz-akkoorden en off-beat groove (Anyma / Nils Hoffmann stijl)',
+        scaleType: 'minor',
+        project: {
+            version: 2,
+            bpm: 123, steps: 16, swing: 0.07,
+            rootNote: 'A', keyMode: 'minor',
+            genreSelect: 'organic_house', progressionSelect: 'anyma_style',
+            chordBars: 4, voiceLead: true,
+            pianoSound: 'lush_pad', chordPreset: 'lush_pad',
+            attack: 0.8, decay: 0.5, sustain: 0.8, release: 3.0,
+            detune: 0, chorus: 0.1, reverb: 0.65, reverbDecay: 5,
+            delay: 0.3, distortion: 0, filter: 3500,
+            chordVolume: -5, chordMute: false,
+            sidechain: { enabled: true, depth: 0.65, release: 0.28 },
+            arp: { enabled: false, mode: 'up', rate: '16n', octaves: 1, gate: 0.5 },
+            master: { compEnabled: true, threshold: -24, ratio: 4, attack: 0.003, release: 0.28, knee: 7, limThreshold: -1 },
+            currentPattern: 'A',
+            patterns: mkPats({
+                // Kick: 4-on-the-floor
+                1: { steps: d16([1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0]), vels: tv(), probs: tv(), gates: tg() },
+                // Clap: beats 2 & 4
+                2: { steps: d16([0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0]), vels: tv(), probs: tv(), gates: tg() },
+                // Hi-hat: syncopated off-beat (cinematisch — niet straight)
+                3: { steps: d16([0,1,0,0, 1,0,0,1, 0,0,1,0, 1,0,0,1]), vels: tv(), probs: tv(), gates: tg() },
+                // Bass: A3-G3-F3-E3 (Am–F–G–E lijn)
+                4: { steps: m16([57,null,null,null, null,null,55,null, 53,null,null,null, null,null,52,null]), vels: tv(), probs: tv(), gates: tg() },
+            }),
+            songArrangement: [], songMode: false, progression: [], chordNames: [], scale: [],
+            nextUid: 7,
+            tracks: [
+                // Kick — acoustic, sidechain trigger
+                mkTrack(1, 'kick',  'KICK',  d16([1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0]),
+                    { sidechain: true, kickType: 'acoustic' }),
+                // Clap — airy, with room reverb
+                mkTrack(2, 'snare', 'CLAP',  d16([0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0]),
+                    { fx: { rev: 0.22, dly: 0, flt: 20000, dist: 0 } }),
+                // Hi-hat — open, syncopated, pulled back in volume
+                mkTrack(3, 'hihat', 'HI-HAT', d16([0,1,0,0, 1,0,0,1, 0,0,1,0, 1,0,0,1]),
+                    { hihatType: 'open', volume: -5 }),
+                // Bass — warm sub, A3-G3-F3-E3 (anyma-stijl walking line)
+                mkTrack(4, 'bass',  'BASS',
+                    m16([57,null,null,null, null,null,55,null, 53,null,null,null, null,null,52,null]),
+                    { editMode: 'steps', bassType: 'sub',
+                      fx: { rev: 0, dly: 0, flt: 550, dist: 0 } }),
+                // Melody — drijvende, emotionele lijn in A klein
+                mkTrack(5, 'melody', 'MELODY', Array(32).fill(null), {
+                    fx: { rev: 0.45, dly: 0.28, flt: 5000, dist: 0 },
+                    pianoRollBars: 4,
+                    pianoRoll: [
+                        // Bar 1 (Am) — A4 lang, dalend naar E4
+                        { id:1,  note:69, start:0,     dur:1.5,  vel:90  }, // A4
+                        { id:2,  note:67, start:2,     dur:0.75, vel:80  }, // G4
+                        { id:3,  note:64, start:3,     dur:0.5,  vel:85  }, // E4
+                        // Bar 2 (Fmaj) — stijgend via F4
+                        { id:4,  note:62, start:4,     dur:1,    vel:80  }, // D4
+                        { id:5,  note:64, start:5.25,  dur:0.75, vel:85  }, // E4
+                        { id:6,  note:65, start:6.5,   dur:1.5,  vel:80  }, // F4
+                        // Bar 3 (Gmaj) — spanningsboog via G4 naar A4
+                        { id:7,  note:67, start:8.5,   dur:0.5,  vel:85  }, // G4
+                        { id:8,  note:69, start:9.5,   dur:0.5,  vel:90  }, // A4
+                        { id:9,  note:67, start:10.5,  dur:0.5,  vel:80  }, // G4
+                        { id:10, note:64, start:11.5,  dur:0.5,  vel:85  }, // E4
+                        // Bar 4 (E7) — oplossing via F#4 leading tone
+                        { id:11, note:64, start:12,    dur:1,    vel:90  }, // E4
+                        { id:12, note:66, start:13.5,  dur:0.5,  vel:85  }, // F#4 (leading)
+                        { id:13, note:64, start:14,    dur:0.5,  vel:90  }, // E4
+                        { id:14, note:62, start:14.75, dur:1.25, vel:85  }, // D4 held→volgende loop
+                    ],
+                }),
+                // Pad — lush, extended jazz voicings
+                // Am9 · Fmaj9 · Gmaj7 · E7  (open spacing, hoge noten bovenaan)
+                mkTrack(6, 'pad',   'PAD', Array(32).fill(null), {
+                    padPreset: 'lush',
+                    fx: { rev: 0.6, dly: 0.15, flt: 3500, dist: 0 },
+                    volume: -5,
+                    pianoRollBars: 4,
+                    pianoRoll: [
+                        // Am9: A3(57) C4(60) E4(64) G4(67) B4(71)
+                        { id:1,  note:57, start:0,  dur:3.85, vel:72 },
+                        { id:2,  note:60, start:0,  dur:3.85, vel:68 },
+                        { id:3,  note:64, start:0,  dur:3.85, vel:68 },
+                        { id:4,  note:67, start:0,  dur:3.85, vel:65 },
+                        { id:5,  note:71, start:0,  dur:3.85, vel:60 },
+                        // Fmaj9: F3(53) A3(57) C4(60) E4(64) G4(67)
+                        { id:6,  note:53, start:4,  dur:3.85, vel:72 },
+                        { id:7,  note:57, start:4,  dur:3.85, vel:68 },
+                        { id:8,  note:60, start:4,  dur:3.85, vel:68 },
+                        { id:9,  note:64, start:4,  dur:3.85, vel:65 },
+                        { id:10, note:67, start:4,  dur:3.85, vel:60 },
+                        // Gmaj7: G3(55) B3(59) D4(62) F#4(66)
+                        { id:11, note:55, start:8,  dur:3.85, vel:72 },
+                        { id:12, note:59, start:8,  dur:3.85, vel:68 },
+                        { id:13, note:62, start:8,  dur:3.85, vel:68 },
+                        { id:14, note:66, start:8,  dur:3.85, vel:65 },
+                        // E7: E3(52) G#3(56) B3(59) D4(62)
+                        { id:15, note:52, start:12, dur:3.85, vel:72 },
+                        { id:16, note:56, start:12, dur:3.85, vel:68 },
+                        { id:17, note:59, start:12, dur:3.85, vel:65 },
+                        { id:18, note:62, start:12, dur:3.85, vel:62 },
+                    ],
+                }),
+            ],
+        }
+    },
+
 ];
 
 // ── Template Modal UI ────────────────────────────────────────

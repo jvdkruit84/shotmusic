@@ -161,7 +161,111 @@ function buildChannelStrip(track) {
     });
     btnRow.append(muteBtn, soloBtn);
     strip.appendChild(btnRow);
+
+    // ── FX button → opens floating panel ───────────────────
+    const fxBtn = document.createElement('button');
+    fxBtn.className = 'mix-btn mix-fx-open-btn';
+    fxBtn.textContent = 'FX';
+    fxBtn.title = 'FX & EQ openen';
+    fxBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        openFxPanel(track, fxBtn);
+    });
+    strip.appendChild(fxBtn);
+
     return strip;
+}
+
+// ── Floating FX / EQ panel ─────────────────────────────────
+let _fxPanelEl   = null;
+let _fxPanelUid  = null;
+
+function openFxPanel(track, anchorEl) {
+    // Toggle: close if already open for this track
+    if (_fxPanelEl && _fxPanelUid === track.uid) { closeFxPanel(); return; }
+    closeFxPanel();
+
+    _fxPanelUid = track.uid;
+    const panel = document.createElement('div');
+    panel.className = 'mix-fx-panel';
+    _fxPanelEl = panel;
+
+    // Header
+    const hdr = document.createElement('div'); hdr.className = 'mix-fx-panel-hdr';
+    const title = document.createElement('span'); title.textContent = track.label + ' — FX & EQ';
+    const closeBtn = document.createElement('button'); closeBtn.textContent = '×'; closeBtn.className = 'mix-fx-panel-close';
+    closeBtn.addEventListener('click', closeFxPanel);
+    hdr.append(title, closeBtn);
+    panel.appendChild(hdr);
+
+    // FX rows
+    const fxSec = document.createElement('div'); fxSec.className = 'mix-fx-panel-sec';
+    fxSec.innerHTML = '<div class="mix-fx-panel-sec-lbl">FX</div>';
+    const fx = track.fx || {};
+    [
+        { key:'rev',  label:'Reverb',    min:0,   max:1,     step:0.01, fmt: v => Math.round(v*100)+'%',  def: fx.rev  ?? 0 },
+        { key:'dly',  label:'Delay',     min:0,   max:0.9,   step:0.01, fmt: v => Math.round(v*100)+'%',  def: fx.dly  ?? 0 },
+        { key:'flt',  label:'Filter',    min:200, max:20000, step:100,  fmt: v => v>=1000?(v/1000).toFixed(1)+'k':v+'Hz', def: fx.flt ?? 20000 },
+        { key:'dist', label:'Distortion',min:0,   max:1,     step:0.01, fmt: v => Math.round(v*100)+'%',  def: fx.dist ?? 0 },
+    ].forEach(d => {
+        const row = _makeFxRow(d.label, d.min, d.max, d.step, d.def, d.fmt, v => {
+            updateTrackFx(track, d.key, v); autoSave();
+        });
+        fxSec.appendChild(row);
+    });
+    panel.appendChild(fxSec);
+
+    // EQ rows
+    const eqSec = document.createElement('div'); eqSec.className = 'mix-fx-panel-sec';
+    eqSec.innerHTML = '<div class="mix-fx-panel-sec-lbl">EQ</div>';
+    const eq = track.eq || {};
+    const fmtDb = v => (v>0?'+':'')+Number(v).toFixed(1)+'dB';
+    [
+        { key:'low',  label:'Low',  def: eq.low  ?? 0 },
+        { key:'mid',  label:'Mid',  def: eq.mid  ?? 0 },
+        { key:'high', label:'High', def: eq.high ?? 0 },
+    ].forEach(d => {
+        const row = _makeFxRow(d.label, -12, 12, 0.5, d.def, fmtDb, v => {
+            updateTrackEq(track, d.key, v); autoSave();
+        });
+        eqSec.appendChild(row);
+    });
+    panel.appendChild(eqSec);
+
+    // Position near the FX button
+    document.body.appendChild(panel);
+    const rect = anchorEl.getBoundingClientRect();
+    const pw = 260;
+    let left = rect.left - pw - 6;
+    if (left < 6) left = rect.right + 6;
+    const top  = Math.min(rect.top, window.innerHeight - panel.offsetHeight - 12);
+    panel.style.left = left + 'px';
+    panel.style.top  = Math.max(8, top) + 'px';
+
+    // Close on outside click
+    setTimeout(() => document.addEventListener('click', _fxOutsideClick), 10);
+}
+
+function _makeFxRow(label, min, max, step, defVal, fmt, onChange) {
+    const row = document.createElement('div'); row.className = 'mix-fx-panel-row';
+    const lbl = document.createElement('span'); lbl.className = 'mix-fx-panel-lbl'; lbl.textContent = label;
+    const sl  = document.createElement('input');
+    sl.type='range'; sl.className='mix-fx-panel-slider'; sl.min=min; sl.max=max; sl.step=step; sl.value=defVal;
+    const val = document.createElement('span'); val.className = 'mix-fx-panel-val'; val.textContent = fmt(defVal);
+    sl.addEventListener('input', function() {
+        const v = +this.value; val.textContent = fmt(v); onChange(v);
+    });
+    row.append(lbl, sl, val);
+    return row;
+}
+
+function _fxOutsideClick(e) {
+    if (_fxPanelEl && !_fxPanelEl.contains(e.target)) closeFxPanel();
+}
+
+function closeFxPanel() {
+    _fxPanelEl?.remove(); _fxPanelEl = null; _fxPanelUid = null;
+    document.removeEventListener('click', _fxOutsideClick);
 }
 
 function buildMasterStrip() {

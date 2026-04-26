@@ -99,7 +99,10 @@ function buildChordPart() {
     chordPart=new Tone.Part((time,val)=>{
         // Only auto-play if no chord steps are programmed
         const hasChordSteps=SEQ.chordSteps?.some(s=>s);
-        if(!S.chordMute && !hasChordSteps) chordSynth?.triggerAttackRelease(val.notes.map(midiFreq),dur,time);
+        if(!S.chordMute && !hasChordSteps) {
+            chordSynth?.releaseAll(time);
+            chordSynth?.triggerAttackRelease(val.notes.map(midiFreq),dur,time);
+        }
         Tone.Draw.schedule(()=>{
             setActiveChord(val.idx);
             document.querySelectorAll('.chord-card').forEach((c,i)=>c.classList.toggle('playing',i===val.idx));
@@ -713,6 +716,87 @@ function showStepOptsPopup(track, idx, anchor) {
 function closeStepOptsPopup(){ if(stepOptsPopupEl){ stepOptsPopupEl.remove(); stepOptsPopupEl=null; } }
 
 function hexAlpha(hex,a){ const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16); return `rgba(${r},${g},${b},${a})`; }
+
+// ── Extract chord progression → melody track ─────────────────
+const MELODIC_TYPES = new Set(['melody', 'bass', 'pad']);
+
+function _chordExtractPopulateTrackSel() {
+    const sel = document.getElementById('chordExTrack');
+    sel.innerHTML = '';
+    const mel = SEQ.tracks.filter(t => t.melodic || MELODIC_TYPES.has(t.type));
+    if (!mel.length) {
+        // Fallback: show all tracks so the user can at least pick something
+        SEQ.tracks.forEach(t => {
+            const o = document.createElement('option');
+            o.value = t.uid; o.textContent = t.label;
+            sel.appendChild(o);
+        });
+    } else {
+        mel.forEach(t => {
+            const o = document.createElement('option');
+            o.value = t.uid; o.textContent = t.label;
+            sel.appendChild(o);
+        });
+    }
+}
+
+function extractChordsToMelody() {
+    try {
+    const uid      = +document.getElementById('chordExTrack').value;
+    const choice   = document.getElementById('chordExNote').value;
+    const track    = SEQ.tracks.find(t => t.uid === uid);
+    if (!track) { setStatus('Kies eerst een track', 'err'); return; }
+
+    const steps      = SEQ.steps;
+    const chords     = S.progression;
+    const count      = chords.length;
+    const perChord   = Math.max(1, Math.floor(steps / count));
+
+    const newSteps   = Array(32).fill(null);
+    const gates      = Array(32).fill(80);
+
+    chords.forEach((chord, ci) => {
+        if (!chord.length) return;
+        let note;
+        const sorted = [...chord].sort((a, b) => a - b);
+        if      (choice === 'bass')  note = sorted[0];
+        else if (choice === 'top')   note = sorted[sorted.length - 1];
+        else if (choice === 'root2') note = sorted[0] + 12;
+        else                          note = sorted[Math.floor(sorted.length / 2)];
+
+        const step = ci * perChord;
+        if (step < steps) {
+            newSteps[step] = note;
+            // Gate sustains almost the full chord slot
+            gates[step] = Math.min(perChord * 95, 380);
+        }
+    });
+
+    if (typeof pushHistory === 'function') pushHistory();
+    // Ensure track is in melodic (note) mode
+    if (!track.melodic) { track.melodic = true; if (typeof buildSeqGrid === 'function') {} }
+    track.steps = newSteps;
+    track.gates = gates;
+    buildSeqGrid();
+    if (S.isPlaying) buildSeqLoop();
+    setStatus(`Akkoorden → ${track.label} geschreven`, 'ok');
+
+    // Close panel
+    document.getElementById('chordExtractPanel').classList.add('hidden');
+    } catch(e) {
+        console.error('extractChordsToMelody fout:', e);
+        setStatus('Fout bij schrijven: ' + e.message, 'err');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('btnChordExtract').addEventListener('click', () => {
+        const panel = document.getElementById('chordExtractPanel');
+        const open  = panel.classList.toggle('hidden');
+        if (!open) _chordExtractPopulateTrackSel(); // populate when opening
+    });
+    document.getElementById('btnChordExGo').addEventListener('click', extractChordsToMelody);
+});
 
 function refreshStepBtn(track, idx) {
     const btn=document.querySelector(`.seq-step[data-uid="${track.uid}"][data-step="${idx}"]`);

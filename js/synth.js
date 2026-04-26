@@ -17,8 +17,13 @@ function buildMasterBus() {
 
 function getMasterInput() { return masterComp ?? Tone.getDestination(); }
 
+
 async function startAudio() {
     if (S.audioReady) return;
+    // Give Chrome's scheduler more headroom: schedule 200ms ahead (default 100ms).
+    // updateInterval 50ms means Tone checks the queue every 50ms — less CPU churn.
+    Tone.getContext().lookAhead      = 0.2;
+    Tone.getContext().updateInterval = 0.05;
     await Tone.start();
     S.audioReady = true;
     buildMasterBus();
@@ -26,6 +31,8 @@ async function startAudio() {
     if (typeof startMasterAnimation === 'function') startMasterAnimation();
     buildChordSynth(getPreset());
     buildAllSynths();
+    await restoreLocalSamples();
+    if (typeof restoreAudioClips === 'function') restoreAudioClips();
     if (typeof initMidiLearn === 'function') initMidiLearn();
     setStatus('Audio klaar','ok');
 }
@@ -99,8 +106,22 @@ const CHORD_PRESETS = {
 
 function getPreset() { return V('chordPreset') ?? 'warm_pad'; }
 
+// Pool of individual Tone.Synth voices backing the chord synth.
+// Using individual synths instead of PolySynth avoids:
+//   - "Max polyphony exceeded" (PolySynth counts releasing voices toward the limit)
+//   - "Events scheduled inside callbacks" (PolySynth allocates voices lazily in ticks)
+// Round-robin assignment means a busy voice just gets retriggered — no drop.
+let _chordPool = [];
+let _chordPoolIdx = 0;
+let _chordFreqMap = new Map(); // freq → voice (for triggerAttack/triggerRelease pairs)
+
 function buildChordSynth(presetKey) {
-    [chordSynth,chordChorus,chordDelay,chordReverb,chordFilter,chordVol,chordDist].forEach(n=>{try{n?.dispose();}catch(e){}});
+    // Dispose old pool voices first
+    _chordPool.forEach(s => { try { s.dispose(); } catch(e) {} });
+    _chordPool = [];
+    _chordPoolIdx = 0;
+    // Dispose effects chain (chordSynth is now the wrapper object, skip it)
+    [chordChorus,chordDelay,chordReverb,chordFilter,chordVol,chordDist].forEach(n=>{try{n?.dispose();}catch(e){}});
 
     const p   = CHORD_PRESETS[presetKey] ?? CHORD_PRESETS.warm_pad;
     const atk = +V('attack'), rel = +V('release');
@@ -118,15 +139,58 @@ function buildChordSynth(presetKey) {
         volume:     p.vol,
     };
 
-    // Effects chain: synth → dist → chorus → delay → reverb → filter → vol → out
+    // Effects chain: synth pool → dist → chorus → delay → reverb → filter → vol → out
     chordVol    = new Tone.Volume(+V('chordVolume')).connect(getMasterInput());
     chordFilter = new Tone.Filter(p.filter ?? +V('filter'), 'lowpass').connect(chordVol);
-    chordReverb = new Tone.Reverb({decay:+V('reverbDecay'), wet:+V('reverb')}).connect(chordFilter);
+    chordReverb = new Tone.Reverb({decay: Math.max(0.1, +V('reverbDecay')), wet:+V('reverb')}).connect(chordFilter);
     chordDelay  = new Tone.FeedbackDelay('8n.', +V('delay')).connect(chordReverb);
     chordChorus = new Tone.Chorus(3.5, 1.5, +V('chorus')).connect(chordDelay).start();
     chordDist   = new Tone.Distortion(+V('distortion')).connect(chordChorus);
-    chordSynth  = new Tone.PolySynth(Tone.Synth, synthCfg).connect(chordDist);
-    chordSynth.maxPolyphony = 64;
+
+    // 8 individual voices — one per note slot (enough for any chord + arp overlap).
+    // Compensate for up to 4 concurrent notes: -20*log10(sqrt(4)) = -6dB per voice.
+    const chordCompDb = -20 * Math.log10(Math.sqrt(4));
+    const chordCfgComp = { ...synthCfg, volume: (synthCfg.volume ?? 0) + chordCompDb };
+    for (let i = 0; i < 8; i++) {
+        _chordPool.push(new Tone.Synth(chordCfgComp).connect(chordDist));
+    }
+
+    _chordFreqMap.clear();
+
+    // Expose a PolySynth-compatible wrapper so all call sites stay unchanged
+    chordSynth = {
+        triggerAttackRelease(notesOrFreq, dur, time, vel=1) {
+            const notes = Array.isArray(notesOrFreq) ? notesOrFreq : [notesOrFreq];
+            notes.forEach(freq => {
+                const v = _chordPool[_chordPoolIdx];
+                _chordPoolIdx = (_chordPoolIdx + 1) % _chordPool.length;
+                v.triggerAttackRelease(freq, dur, time, vel);
+            });
+        },
+        triggerAttack(freq, time, vel=1) {
+            // Reuse existing voice for this freq if held, otherwise grab next
+            let v = _chordFreqMap.get(freq);
+            if (!v) {
+                v = _chordPool[_chordPoolIdx];
+                _chordPoolIdx = (_chordPoolIdx + 1) % _chordPool.length;
+                _chordFreqMap.set(freq, v);
+            }
+            v.triggerAttack(freq, time, vel);
+        },
+        triggerRelease(freq, time) {
+            const v = _chordFreqMap.get(freq);
+            if (v) { v.triggerRelease(time); _chordFreqMap.delete(freq); }
+        },
+        releaseAll(time) {
+            const t = (time !== undefined) ? time : Tone.now();
+            _chordPool.forEach(v => { try { v.triggerRelease(t); } catch(e) {} });
+            _chordFreqMap.clear();
+        },
+        dispose() {
+            _chordPool.forEach(s => { try { s.dispose(); } catch(e) {} });
+            _chordPool = []; _chordFreqMap.clear();
+        },
+    };
 
     // Sync filter slider if preset has its own value
     if (p.filter) {
@@ -135,9 +199,12 @@ function buildChordSynth(presetKey) {
     }
 }
 
-// Build synths for all tracks
+// Build synths for all tracks — stagger by 80ms so Reverb IR generations
+// don't all compete for CPU at the same moment.
 function buildAllSynths() {
-    SEQ.tracks.forEach(t => buildTrackSynth(t));
+    SEQ.tracks.forEach((t, i) => {
+        setTimeout(() => buildTrackSynth(t), i * 80);
+    });
 }
 
 // Return correct audio destination for track (bus or master)
@@ -158,7 +225,7 @@ function buildTrackFxChain(track) {
     const meter = new Tone.Meter({ smoothing: 0.85 });
     vol.connect(meter);
     track.meterNode = meter;
-    const rev  = new Tone.Reverb({ decay:3, wet: fx.rev }).connect(vol);
+    const rev  = new Tone.Reverb({ decay: 1.5, wet: fx.rev }).connect(vol);
     const dly  = new Tone.FeedbackDelay('8n', 0.4).connect(rev);
     dly.wet.value = fx.dly;
     const flt  = new Tone.Filter(fx.flt, 'lowpass').connect(dly);
@@ -226,6 +293,49 @@ function stopTrackLFO(track) {
 }
 
 
+// Creates a fixed-size voice pool as a drop-in replacement for PolySynth.
+// Pre-allocated voices mean Chrome never has to spin up new AudioWorkletNodes mid-playback.
+// maxConcurrent: expected simultaneous notes — used to compensate for gain summing.
+// Without compensation, 5 voices at -15dB sum to -1dB (≈ clipping).
+function _makeVoicePool(size, synthCfg, dest, maxConcurrent = 1) {
+    // Reduce each voice by 20*log10(sqrt(maxConcurrent)) so N voices summed stay near the
+    // same RMS as one voice. sqrt avoids over-attenuating since voices aren't perfectly in phase.
+    const compensationDb = maxConcurrent > 1 ? -20 * Math.log10(Math.sqrt(maxConcurrent)) : 0;
+    const adjustedVol = (synthCfg.volume ?? 0) + compensationDb;
+    const cfg = { ...synthCfg, volume: adjustedVol };
+    const pool = [];
+    let idx = 0;
+    for (let i = 0; i < size; i++) pool.push(new Tone.Synth(cfg).connect(dest));
+    return {
+        triggerAttackRelease(notesOrFreq, dur, time, vel = 1) {
+            const notes = Array.isArray(notesOrFreq) ? notesOrFreq : [notesOrFreq];
+            notes.forEach(freq => {
+                const v = pool[idx]; idx = (idx + 1) % pool.length;
+                try { v.triggerAttackRelease(freq, dur, time, vel); } catch(e) {}
+            });
+        },
+        triggerAttack(freq, time, vel = 1) {
+            const v = pool[idx]; idx = (idx + 1) % pool.length;
+            try { v.triggerAttack(freq, time, vel); } catch(e) {}
+        },
+        triggerRelease(freq, time) {
+            // best-effort: release the most-recently-used voice
+            const prev = pool[(idx - 1 + pool.length) % pool.length];
+            try { prev.triggerRelease(time ?? Tone.now()); } catch(e) {}
+        },
+        releaseAll(time) {
+            const t = time ?? Tone.now();
+            pool.forEach(v => { try { v.triggerRelease(t); } catch(e) {} });
+        },
+        dispose() {
+            pool.forEach(v => { try { v.dispose(); } catch(e) {} });
+            pool.length = 0;
+        },
+        // Allow LFO to reach the first voice's oscillator frequency param
+        get frequency() { return pool[0]?.frequency; },
+    };
+}
+
 function buildTrackSynth(track) {
     stopTrackLFO(track);
     try{track.synth?.dispose();}catch(e){}
@@ -267,6 +377,16 @@ function buildTrackSynth(track) {
                 track.sampleFile   = null;
                 buildTrackSynth(track);
             });
+        buildTrackLFO(track);
+        return;
+    }
+
+    // Local-file sample (loaded via drag/drop or loadSampleFile):
+    // AudioBuffer is kept on track._localBuffer so it survives buildTrackSynth rebuilds
+    if (track._localBuffer) {
+        const player = new Tone.Player(track._localBuffer).connect(inp);
+        player.retrigger = true;
+        track.samplePlayer = player;
         buildTrackLFO(track);
         return;
     }
@@ -331,46 +451,121 @@ function buildTrackSynth(track) {
         const key = V('pianoSound') ?? 'pluck';
         const p = CHORD_PRESETS[key] ?? CHORD_PRESETS.pluck;
         const melEnv = { ...p.env, attack: Math.min(p.env.attack, 0.05) };
-        track.synth = new Tone.PolySynth(Tone.Synth, {
-            oscillator: p.osc,
-            envelope:   melEnv,
-            volume:     p.vol,
-        }).connect(inp);
-        track.synth.maxPolyphony = 64;
+        track.synth = _makeVoicePool(8,  { oscillator: p.osc, envelope: melEnv, volume: p.vol }, inp, 2);
     } else if (track.type === 'pad') {
         const p = PAD_PRESETS[track.padPreset ?? 'warm'] ?? PAD_PRESETS.warm;
-        track.synth = new Tone.PolySynth(Tone.Synth, {
-            oscillator: p.osc,
-            envelope:   p.env,
-            volume:     p.vol,
-        }).connect(inp);
-        track.synth.maxPolyphony = 64;
+        track.synth = _makeVoicePool(12, { oscillator: p.osc, envelope: p.env,  volume: p.vol }, inp, 5);
     }
     // sample type: no Tone synth — Howler.js handles playback
     buildTrackLFO(track);
 }
 
-// ── Sample loading (Howler.js) ──────────────────────────────
+// ── IndexedDB sample cache ─────────────────────────────────
+// Persists decoded ArrayBuffers by filename so samples survive page reload.
+let _sampleDb = null;
+function _openSampleDb() {
+    return new Promise((res, rej) => {
+        if (_sampleDb) { res(_sampleDb); return; }
+        const req = indexedDB.open('shotmusic_samples', 1);
+        req.onupgradeneeded = e => e.target.result.createObjectStore('samples', { keyPath: 'name' });
+        req.onsuccess = e => { _sampleDb = e.target.result; res(_sampleDb); };
+        req.onerror   = e => rej(e.target.error);
+    });
+}
+function _dbStore(name, buf) {
+    _openSampleDb().then(db => {
+        const tx = db.transaction('samples', 'readwrite');
+        tx.objectStore('samples').put({ name, buf });
+    }).catch(e => console.warn('sample cache write failed', e));
+}
+function _dbLoad(name) {
+    return _openSampleDb().then(db => new Promise((res, rej) => {
+        const req = db.transaction('samples').objectStore('samples').get(name);
+        req.onsuccess = e => res(e.target.result?.buf ?? null);
+        req.onerror   = e => rej(e.target.error);
+    }));
+}
+function _dbDelete(name) {
+    _openSampleDb().then(db =>
+        db.transaction('samples','readwrite').objectStore('samples').delete(name)
+    ).catch(() => {});
+}
+
+// After project load + buildAllSynths: rebuild players for tracks that have a
+// cached sample in IndexedDB but lost their _localBuffer (e.g. after page reload).
+async function restoreLocalSamples() {
+    const tracks = SEQ.tracks.filter(t => t.filename && !t._localBuffer);
+    for (const t of tracks) {
+        try {
+            const buf = await _dbLoad(t.filename);
+            if (!buf) continue;
+            const audioBuf = await Tone.getContext().rawContext.decodeAudioData(buf.slice(0));
+            if (!t.fxNodes) buildTrackFxChain(t);
+            const player = new Tone.Player(audioBuf).connect(t.fxNodes.dist);
+            player.retrigger = true;
+            t.samplePlayer = player;
+            t._localBuffer = audioBuf;
+            if (typeof _refreshSampleBtn === 'function') _refreshSampleBtn(t);
+            setStatus('Sample hersteld: ' + t.filename.replace(/\.[^.]+$/, ''), 'ok');
+        } catch(e) {
+            console.warn('sample restore failed for', t.filename, e);
+        }
+    }
+}
+
+// ── Sample loading (local file → decodeAudioData + Tone.Player) ──
+const AUDIO_EXTENSIONS = new Set(['wav','mp3','ogg','flac','aiff','aif','webm','opus','m4a','aac','weba']);
+
 function loadSampleFile(track, file) {
-    if (!file || !file.type.match(/audio/)) { setStatus('Ongeldig bestandstype','err'); return; }
+    if (!file) return;
+    const ext = file.name.split('.').pop().toLowerCase();
+    const mimeOk = file.type.match(/audio/) || file.type.match(/video\/webm/);
+    if (!mimeOk && !AUDIO_EXTENSIONS.has(ext)) {
+        setStatus('Ongeldig bestandstype: ' + (file.type || ext), 'err');
+        return;
+    }
+
+    setStatus('Sample laden…');
     const reader = new FileReader();
     reader.onload = e => {
-        track.howl?.unload();
-        track.howl = new Howl({
-            src: [e.target.result],
-            format: [file.name.split('.').pop().toLowerCase()],
-            volume: 0.85,
-            pool: 8,   // up to 8 simultaneous instances (rapid fire steps)
-            onload: () => {
-                track.filename = file.name;
-                const el = document.querySelector(`.sample-drop[data-uid="${track.uid}"]`);
-                if (el) { el.textContent = file.name.replace(/\.[^.]+$/,''); el.classList.add('loaded'); }
-                setStatus('Sample geladen: ' + file.name, 'ok');
-            },
-            onloaderror: () => setStatus('Fout bij laden sample','err'),
-        });
+        // Slice a copy BEFORE decodeAudioData — Chrome detaches the original ArrayBuffer after decode.
+        const rawBuf  = e.target.result;
+        const bufCopy = rawBuf.slice(0);
+        Tone.getContext().rawContext.decodeAudioData(rawBuf)
+            .then(audioBuf => {
+                // Dispose old players
+                try { track.samplePlayer?.dispose(); } catch(_) {}
+                track.howl?.unload();
+                track.howl = null;
+
+                // Ensure fx chain exists (track might not be audio-ready yet)
+                if (!track.fxNodes) buildTrackFxChain(track);
+                const inp = track.fxNodes.dist;
+
+                const player = new Tone.Player(audioBuf).connect(inp);
+                player.retrigger = true;
+                track.samplePlayer  = player;
+                track.filename      = file.name;
+                track._localBuffer  = audioBuf; // persist across buildTrackSynth rebuilds
+
+                // Keep pack/cat null so project.js knows it's a local blob (no server URL)
+                track.samplePack = null;
+                track.sampleCat  = null;
+                track.sampleFile = file.name;
+
+                // Cache in IndexedDB so sample survives page reload
+                _dbStore(file.name, bufCopy);
+
+                if (typeof _refreshSampleBtn === 'function') _refreshSampleBtn(track);
+                if (typeof showWaveform     === 'function') showWaveform(audioBuf, file.name);
+                setStatus('Sample geladen: ' + file.name.replace(/\.[^.]+$/, ''), 'ok');
+            })
+            .catch(err => {
+                console.error('decodeAudioData mislukt:', err);
+                setStatus('Sample decoderen mislukt (beschadigd of onbekend formaat)', 'err');
+            });
     };
-    reader.readAsDataURL(file);
+    reader.readAsArrayBuffer(file);
 }
 
 // ── Helpers ────────────────────────────────────────────────
@@ -387,7 +582,14 @@ function triggerTrack(track, time, vel=100) {
     if (track.samplePlayer?.loaded) {
         try {
             track.samplePlayer.volume.value = 20 * Math.log10(Math.max(v, 0.01));
-            track.samplePlayer.start(time);
+            const offset  = track.trimStart ?? 0;
+            const trimEnd = track.trimEnd;
+            if (offset > 0 || trimEnd != null) {
+                const dur = trimEnd != null ? trimEnd - offset : undefined;
+                track.samplePlayer.start(time, offset, dur);
+            } else {
+                track.samplePlayer.start(time);
+            }
         } catch(e) { console.warn('sample start error', e); }
         if (track.type === 'kick') triggerSidechain(time);
         return;

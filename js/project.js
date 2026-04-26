@@ -85,6 +85,8 @@ function collectProjectData() {
             automation: t.automation ?? null,
             eq:        t.eq ?? {low:0,mid:0,high:0},
             busRoute:  t.busRoute ?? null,
+            trimStart: t.trimStart ?? null,
+            trimEnd:   t.trimEnd   ?? null,
         })),
     };
 }
@@ -229,6 +231,8 @@ async function loadProjectData(data, opts={}) {
             automation: td.automation ?? null,
             eq:        td.eq ?? {low:0,mid:0,high:0},
             busRoute:  td.busRoute ?? null,
+            trimStart: td.trimStart ?? null,
+            trimEnd:   td.trimEnd   ?? null,
         };
         SEQ.tracks.push(t);
     });
@@ -325,63 +329,429 @@ function exportMidi() {
     setStatus(`MIDI geëxporteerd (${midiTracks.length-1} tracks)!`,'ok');
 }
 
-// ── Stem export ─────────────────────────────────────────────
-async function exportStems() {
-    const bars = parseInt(prompt('Hoeveel bars opnemen per stem?', '8'));
-    if (!bars || bars < 1 || bars > 64) return;
-    await startAudio();
-    const bpm = Tone.getTransport().bpm.value;
-    const barMs = (60000 / bpm) * 4;
-    const recMs = bars * barMs + 500;
-    const origMutes = SEQ.tracks.map(t => t.mute);
-    const wasPlaying = S.isPlaying;
+// ── Mixdown & Export ─────────────────────────────────────────
 
-    setStatus('Stems exporteren…');
-    for (let i = 0; i < SEQ.tracks.length; i++) {
-        const track = SEQ.tracks[i];
-        // Mute all except this track
-        SEQ.tracks.forEach((t, j) => { t.mute = j !== i; });
-        if (S.isPlaying) stopPlayback();
+// Selected bar count for mixdown (default 8)
+let _mixdownBars = 8;
+let _mixdownAborted = false;
 
-        const rec = new Tone.Recorder();
-        Tone.getDestination().connect(rec);
-        startPlayback();
-        await new Promise(r => setTimeout(r, 300)); // warm-up
-        await rec.start();
-        await new Promise(r => setTimeout(r, recMs));
-        const blob = await rec.stop();
-        rec.dispose();
-        stopPlayback();
-        const safeName = track.label.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-        downloadBlob(blob, `stem_${String(i+1).padStart(2,'0')}_${safeName}.webm`);
-        await new Promise(r => setTimeout(r, 400));
-    }
-    // Restore
-    SEQ.tracks.forEach((t, i) => { t.mute = origMutes[i]; });
-    if (wasPlaying) startPlayback();
-    setStatus(`${SEQ.tracks.length} stems geëxporteerd ✓`, 'ok');
+function openMixdownModal() {
+    document.getElementById('mixdownModal').classList.add('open');
+}
+function closeMixdownModal() {
+    document.getElementById('mixdownModal').classList.remove('open');
 }
 
-// ── Recording ───────────────────────────────────────────────
+function initMixdownUI() {
+    document.getElementById('btnMixdown').addEventListener('click', openMixdownModal);
+    document.getElementById('mixdownClose').addEventListener('click', closeMixdownModal);
+    document.getElementById('mixdownModal').addEventListener('click', e => {
+        if (e.target === e.currentTarget) closeMixdownModal();
+    });
+
+    // Bar selector buttons
+    document.querySelectorAll('.mxd-bar-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.mxd-bar-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('mixdownBarsCustom').value = '';
+            _mixdownBars = +btn.dataset.bars;
+        });
+    });
+    document.getElementById('mixdownBarsCustom').addEventListener('input', function() {
+        const v = parseInt(this.value);
+        if (v >= 1 && v <= 128) {
+            document.querySelectorAll('.mxd-bar-btn').forEach(b => b.classList.remove('active'));
+            _mixdownBars = v;
+        }
+    });
+
+    document.getElementById('btnMixdownStart').addEventListener('click', startMixdown);
+    document.getElementById('btnMixdownAbort').addEventListener('click', abortMixdown);
+    document.getElementById('btnStemExport').addEventListener('click', startStemExport);
+    document.getElementById('btnRecStart').addEventListener('click', startRecording);
+    document.getElementById('btnRecStop').addEventListener('click', stopRecording);
+
+    // Audio Input
+    document.getElementById('btnAudioInputPerm').addEventListener('click', initAudioInputDevices);
+    document.getElementById('btnAudioInputStart').addEventListener('click', startAudioInput);
+    document.getElementById('btnAudioInputStop').addEventListener('click', stopAudioInput);
+    document.getElementById('btnAudioInputMonitor').addEventListener('click', toggleAudioInputMonitor);
+    document.getElementById('audioInputMonGain').addEventListener('input', function () {
+        document.getElementById('audioInputMonGainVal').textContent = Math.round(this.value * 100) + '%';
+        if (_audioInputGain) _audioInputGain.gain.value = +this.value;
+    });
+}
+
+// Helper: tap the master limiter output (reliable signal point)
+function _connectRecorder(rec) {
+    if (masterLimiter) masterLimiter.connect(rec);
+    else Tone.getDestination().connect(rec);
+}
+function _disconnectRecorder(rec) {
+    try { if (masterLimiter) masterLimiter.disconnect(rec); else Tone.getDestination().disconnect(rec); } catch(e) {}
+}
+
+// Animated progress bar over recMs milliseconds
+function _animateProgress(fillId, labelId, totalMs, getLabelFn) {
+    const fill  = document.getElementById(fillId);
+    const label = document.getElementById(labelId);
+    const start = Date.now();
+    let raf;
+    function tick() {
+        const elapsed = Date.now() - start;
+        const pct = Math.min(100, (elapsed / totalMs) * 100);
+        fill.style.width = pct + '%';
+        label.textContent = getLabelFn(elapsed, totalMs);
+        if (pct < 100) raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+}
+
+// ── Auto Mixdown ─────────────────────────────────────────────
+async function startMixdown() {
+    await startAudio();
+    _mixdownAborted = false;
+
+    const bars = _mixdownBars;
+    const bpm  = +document.getElementById('bpm').value || Tone.getTransport().bpm.value;
+    const barMs = (60000 / bpm) * 4;
+    const recMs = bars * barMs + 400; // 400ms tail buffer
+
+    // UI: running state
+    const btnStart = document.getElementById('btnMixdownStart');
+    const btnAbort = document.getElementById('btnMixdownAbort');
+    const progress = document.getElementById('mixdownProgress');
+    btnStart.disabled = true;
+    btnAbort.classList.remove('hidden');
+    progress.classList.remove('hidden');
+
+    const stopAnim = _animateProgress('mixdownFill', 'mixdownProgressLabel', recMs,
+        (elapsed) => {
+            const secLeft = Math.max(0, Math.ceil((recMs - elapsed) / 1000));
+            return `Opnemen — ${secLeft}s resterend…`;
+        }
+    );
+
+    const wasPlaying = S.isPlaying;
+    if (wasPlaying) stopPlayback();
+    Tone.getTransport().position = 0;
+
+    const rec = new Tone.Recorder();
+    _connectRecorder(rec);
+    startPlayback();
+    await new Promise(r => setTimeout(r, 200)); // warm-up
+    await rec.start();
+    setLed('recording');
+
+    await new Promise(r => setTimeout(r, recMs));
+
+    stopAnim();
+
+    if (_mixdownAborted) {
+        await rec.stop();
+        rec.dispose(); _disconnectRecorder(rec);
+        stopPlayback();
+        _resetMixdownUI();
+        setStatus('Mixdown afgebroken', 'err');
+        return;
+    }
+
+    const blob = await rec.stop();
+    rec.dispose(); _disconnectRecorder(rec);
+    stopPlayback();
+
+    // Show 100% briefly before resetting
+    document.getElementById('mixdownFill').style.width = '100%';
+    document.getElementById('mixdownProgressLabel').textContent = 'Klaar! Download wordt gestart…';
+    setLed(S.isPlaying ? 'playing' : 'off');
+    setStatus(`Mixdown klaar — ${bars} bars opgenomen ✓`, 'ok');
+
+    const timestamp = new Date().toISOString().slice(0,16).replace('T','_').replace(':','-');
+    downloadBlob(blob, `shotmusic_mixdown_${bars}bars_${timestamp}.webm`);
+
+    await new Promise(r => setTimeout(r, 1200));
+    _resetMixdownUI();
+}
+
+function abortMixdown() {
+    _mixdownAborted = true;
+}
+
+function _resetMixdownUI() {
+    document.getElementById('btnMixdownStart').disabled = false;
+    document.getElementById('btnMixdownAbort').classList.add('hidden');
+    document.getElementById('mixdownProgress').classList.add('hidden');
+    document.getElementById('mixdownFill').style.width = '0%';
+}
+
+// ── Stem Export ──────────────────────────────────────────────
+async function startStemExport() {
+    await startAudio();
+    const bars = parseInt(document.getElementById('stemBars').value) || 8;
+    const bpm  = +document.getElementById('bpm').value || Tone.getTransport().bpm.value;
+    const barMs = (60000 / bpm) * 4;
+    const recMs = bars * barMs + 400;
+    const origMutes = SEQ.tracks.map(t => t.mute);
+
+    const btn      = document.getElementById('btnStemExport');
+    const progress = document.getElementById('stemProgress');
+    btn.disabled = true;
+    progress.classList.remove('hidden');
+
+    const tracks = SEQ.tracks.filter(t => !t.mute);
+    if (!tracks.length) {
+        btn.disabled = false;
+        progress.classList.add('hidden');
+        setStatus('Geen tracks om te exporteren', 'err');
+        return;
+    }
+
+    setStatus(`Stems exporteren: 0 / ${tracks.length}…`);
+
+    for (let i = 0; i < tracks.length; i++) {
+        if (S.isPlaying) stopPlayback();
+        Tone.getTransport().position = 0;
+
+        // Mute all except this track
+        SEQ.tracks.forEach((t, j) => { t.mute = SEQ.tracks[j].uid !== tracks[i].uid; });
+
+        // Update progress UI
+        document.getElementById('stemFill').style.width = ((i / tracks.length) * 100) + '%';
+        document.getElementById('stemProgressLabel').textContent =
+            `Track ${i + 1} / ${tracks.length}: ${tracks[i].label}`;
+
+        const rec = new Tone.Recorder();
+        _connectRecorder(rec);
+        startPlayback();
+        await new Promise(r => setTimeout(r, 250));
+        await rec.start();
+        setLed('recording');
+        await new Promise(r => setTimeout(r, recMs));
+        const blob = await rec.stop();
+        rec.dispose(); _disconnectRecorder(rec);
+        stopPlayback();
+
+        const safeName = tracks[i].label.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        downloadBlob(blob, `stem_${String(i+1).padStart(2,'0')}_${safeName}.webm`);
+        await new Promise(r => setTimeout(r, 300));
+    }
+
+    // Restore mutes
+    SEQ.tracks.forEach((t, i) => { t.mute = origMutes[i]; });
+    setLed('off');
+
+    document.getElementById('stemFill').style.width = '100%';
+    document.getElementById('stemProgressLabel').textContent = `${tracks.length} stems klaar ✓`;
+    setStatus(`${tracks.length} stems geëxporteerd ✓`, 'ok');
+
+    await new Promise(r => setTimeout(r, 1500));
+    btn.disabled = false;
+    progress.classList.add('hidden');
+    document.getElementById('stemFill').style.width = '0%';
+}
+
+// ── Handmatige opname ────────────────────────────────────────
 async function startRecording() {
     await startAudio();
     toneRecorder = new Tone.Recorder();
-    Tone.getDestination().connect(toneRecorder);
+    _connectRecorder(toneRecorder);
     await toneRecorder.start();
-    document.getElementById('btnRecStop').disabled=false;
-    document.getElementById('btnRecStart').disabled=true;
+    document.getElementById('btnRecStop').disabled = false;
+    document.getElementById('btnRecStart').disabled = true;
     setLed('recording');
-    setStatus('Opname loopt…');
+    setStatus('Opname loopt — klik Stop om te downloaden…');
 }
 async function stopRecording() {
-    if(!toneRecorder) return;
+    if (!toneRecorder) return;
     const blob = await toneRecorder.stop();
-    toneRecorder.dispose(); toneRecorder=null;
-    downloadBlob(blob,'shotmusic.webm');
-    document.getElementById('btnRecStop').disabled=true;
-    document.getElementById('btnRecStart').disabled=false;
-    setLed(S.isPlaying?'playing':'off');
-    setStatus('Opname opgeslagen!','ok');
+    _disconnectRecorder(toneRecorder);
+    toneRecorder.dispose(); toneRecorder = null;
+    document.getElementById('btnRecStop').disabled = true;
+    document.getElementById('btnRecStart').disabled = false;
+    setLed(S.isPlaying ? 'playing' : 'off');
+    const timestamp = new Date().toISOString().slice(0,16).replace('T','_').replace(':','-');
+    downloadBlob(blob, `shotmusic_opname_${timestamp}.webm`);
+    setStatus('Opname opgeslagen ✓', 'ok');
+}
+
+// ── Audio Input Recording ────────────────────────────────────
+let _audioInputStream   = null;
+let _audioInputRecorder = null;
+let _audioInputSource   = null;
+let _audioInputGain     = null;
+let _audioInputAnalyser = null;
+let _audioInputMonitoring = false;
+let _audioInputLevelRAF = null;
+let _audioInputChunks   = [];
+
+async function initAudioInputDevices() {
+    const sel = document.getElementById('audioInputDevice');
+    const btn = document.getElementById('btnAudioInputPerm');
+    btn.disabled = true;
+    btn.textContent = 'Bezig…';
+    try {
+        // Temp stream to trigger permission dialog, then stop it immediately
+        const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+        tmp.getTracks().forEach(t => t.stop());
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const inputs  = devices.filter(d => d.kind === 'audioinput');
+        sel.innerHTML = '';
+        inputs.forEach((d, i) => {
+            const opt = document.createElement('option');
+            opt.value = d.deviceId;
+            opt.textContent = d.label || `Microfoon ${i + 1}`;
+            sel.appendChild(opt);
+        });
+        btn.textContent = '↺ Verversen';
+        setStatus(`${inputs.length} audio-apparaat(en) gevonden`, 'ok');
+    } catch (e) {
+        sel.innerHTML = '<option value="">Geen toegang verleend</option>';
+        btn.textContent = 'Toestemming';
+        setStatus('Microfoon toegang geweigerd', 'err');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function startAudioInput() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+        setStatus('getUserMedia niet beschikbaar in deze browser', 'err');
+        return;
+    }
+
+    const deviceId = document.getElementById('audioInputDevice').value;
+    const constraints = {
+        audio: deviceId ? { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : true,
+    };
+
+    try {
+        _audioInputStream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (e) {
+        setStatus('Microfoon openen mislukt: ' + e.message, 'err');
+        return;
+    }
+
+    // WebAudio nodes for metering + optional monitoring
+    const rawCtx = Tone.getContext().rawContext;
+    _audioInputSource   = rawCtx.createMediaStreamSource(_audioInputStream);
+    _audioInputAnalyser = rawCtx.createAnalyser();
+    _audioInputAnalyser.fftSize = 256;
+    _audioInputGain = rawCtx.createGain();
+    _audioInputGain.gain.value = +document.getElementById('audioInputMonGain').value || 0.7;
+
+    _audioInputSource.connect(_audioInputAnalyser);
+
+    if (_audioInputMonitoring) {
+        _audioInputSource.connect(_audioInputGain);
+        _audioInputGain.connect(rawCtx.destination);
+    }
+
+    _startInputLevelMeter();
+
+    // Record directly from the stream via MediaRecorder
+    _audioInputChunks = [];
+    _audioInputRecorder = new MediaRecorder(_audioInputStream);
+    _audioInputRecorder.ondataavailable = e => { if (e.data.size > 0) _audioInputChunks.push(e.data); };
+    _audioInputRecorder.onstop = () => {
+        const blob = new Blob(_audioInputChunks, { type: 'audio/webm' });
+        const ts = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
+        downloadBlob(blob, `shotmusic_input_${ts}.webm`);
+        setStatus('Audio input opgeslagen ✓', 'ok');
+        _audioInputChunks = [];
+    };
+    _audioInputRecorder.start();
+
+    document.getElementById('btnAudioInputStart').disabled = true;
+    document.getElementById('btnAudioInputStop').disabled  = false;
+    document.getElementById('btnAudioInputPerm').disabled  = true;
+    const statusEl = document.getElementById('audioInputStatus');
+    statusEl.textContent = '● REC';
+    statusEl.style.color = 'var(--red)';
+    setLed('recording');
+    setStatus('Audio input opname loopt…');
+}
+
+function stopAudioInput() {
+    if (_audioInputRecorder && _audioInputRecorder.state !== 'inactive') {
+        _audioInputRecorder.stop();
+    }
+    _stopInputLevelMeter();
+
+    if (_audioInputSource)   { try { _audioInputSource.disconnect();  } catch(e){} _audioInputSource = null; }
+    if (_audioInputGain)     { try { _audioInputGain.disconnect();    } catch(e){} _audioInputGain   = null; }
+    if (_audioInputAnalyser) { try { _audioInputAnalyser.disconnect();} catch(e){} _audioInputAnalyser = null; }
+    if (_audioInputStream)   { _audioInputStream.getTracks().forEach(t => t.stop()); _audioInputStream = null; }
+    _audioInputRecorder = null;
+
+    document.getElementById('btnAudioInputStart').disabled = false;
+    document.getElementById('btnAudioInputStop').disabled  = true;
+    document.getElementById('btnAudioInputPerm').disabled  = false;
+    const statusEl = document.getElementById('audioInputStatus');
+    statusEl.textContent = 'Gestopt';
+    statusEl.style.color = 'var(--muted)';
+    setLed(S.isPlaying ? 'playing' : 'off');
+}
+
+function toggleAudioInputMonitor() {
+    _audioInputMonitoring = !_audioInputMonitoring;
+    const btn = document.getElementById('btnAudioInputMonitor');
+    btn.textContent = _audioInputMonitoring ? 'Aan' : 'Uit';
+    btn.classList.toggle('active', _audioInputMonitoring);
+
+    if (_audioInputSource && _audioInputGain) {
+        const rawCtx = Tone.getContext().rawContext;
+        if (_audioInputMonitoring) {
+            _audioInputSource.connect(_audioInputGain);
+            _audioInputGain.connect(rawCtx.destination);
+        } else {
+            try { _audioInputGain.disconnect(); } catch(e) {}
+        }
+    }
+}
+
+function _startInputLevelMeter() {
+    const canvas = document.getElementById('audioInputMeter');
+    if (!canvas || !_audioInputAnalyser) return;
+    const ctx = canvas.getContext('2d');
+    const data = new Uint8Array(_audioInputAnalyser.frequencyBinCount);
+    const W = canvas.width, H = canvas.height;
+
+    function draw() {
+        _audioInputLevelRAF = requestAnimationFrame(draw);
+        _audioInputAnalyser.getByteFrequencyData(data);
+
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+        const rms = Math.sqrt(sum / data.length) / 255;
+
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = '#0a0b0f';
+        ctx.fillRect(0, 0, W, H);
+
+        const barW = Math.min(W, rms * W * 3.5);
+        if (barW > 0) {
+            const grad = ctx.createLinearGradient(0, 0, W, 0);
+            grad.addColorStop(0,   '#3af0a0');
+            grad.addColorStop(0.7, '#f0c030');
+            grad.addColorStop(1,   '#f03060');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, barW, H);
+        }
+    }
+    draw();
+}
+
+function _stopInputLevelMeter() {
+    if (_audioInputLevelRAF) { cancelAnimationFrame(_audioInputLevelRAF); _audioInputLevelRAF = null; }
+    const canvas = document.getElementById('audioInputMeter');
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#0a0b0f';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
 }
 
 // ── Reset project ───────────────────────────────────────────

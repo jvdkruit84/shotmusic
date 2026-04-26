@@ -117,8 +117,10 @@ function buildSeqLoop() {
                 const bar=SEQ.songPos;
                 const clip=SEQ.arrangement.find(c=>bar>=c.startBar&&bar<c.startBar+c.lenBars);
                 nextName=clip?.pattern??null;
+                // Schedule audio clips starting at this bar
+                if(typeof scheduleAudioClips==='function') scheduleAudioClips(bar, time);
                 SEQ.songPos++;
-                if(SEQ.songPos>=(SEQ.arrangementBars||32)) SEQ.songPos=0;
+                if(SEQ.songPos>=(SEQ.arrangementBars||32)){ SEQ.songPos=0; if(typeof stopAllAudioClips==='function') stopAllAudioClips(); }
             } else if(SEQ.songArrangement.length>0){
                 // Fallback: old queue-based arrangement
                 nextName=SEQ.songArrangement[SEQ.songPos%SEQ.songArrangement.length];
@@ -177,6 +179,7 @@ function buildSeqLoop() {
                     const notes = track.padMode==='chord' && S.progression[S.currentChord]?.length
                         ? S.progression[S.currentChord].map(midiFreq)
                         : [midiFreq(val)];
+                    track.synth?.releaseAll(time);
                     track.synth?.triggerAttackRelease(notes, dur, time, v);
                     // MIDI out — send root note of chord
                     if(track.midiOut?.enabled && typeof sendMidiNote==='function') {
@@ -198,11 +201,12 @@ function buildSeqLoop() {
         });
         // Automation — apply per-track parameter values
         if(typeof applyStepAutomation==='function'){
-            SEQ.tracks.forEach(t=>{ if(t.automation) applyStepAutomation(t,step,time,steps); });
+            SEQ.tracks.forEach(t=>{ if(t.automation) applyStepAutomation(t,step,time,steps,stepSec16); });
         }
         // Chord step sequencer — trigger chord stab on active steps
         if(!S.chordMute && SEQ.chordSteps?.[step] && S.progression[S.currentChord]?.length) {
             const chordDur=Math.max(0.05, stepSec16*(SEQ.chordStepGate??0.75));
+            chordSynth?.releaseAll(time);
             chordSynth?.triggerAttackRelease(S.progression[S.currentChord].map(midiFreq),chordDur,time);
         }
         Tone.Draw.schedule(()=>{ S.currentSeqStep=step; updateSeqHighlight(step); updateChordStepHighlight(step); },time);
@@ -238,6 +242,7 @@ function stopPlayback() {
     // Stop piano roll parts
     SEQ.tracks.forEach(t => { try{ t.part?.dispose(); }catch(e){} t.part=null; });
     stopArpLoop();
+    if(typeof stopAllAudioClips==='function') stopAllAudioClips();
     S.isPlaying=false; setLed('off'); chordSynth?.releaseAll();
     document.querySelectorAll('.chord-card').forEach(c=>c.classList.remove('playing'));
     updateSeqHighlight(-1); setStatus('Gestopt');

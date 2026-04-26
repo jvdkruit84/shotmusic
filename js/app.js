@@ -376,8 +376,6 @@ function randomPattern() {
 document.getElementById('btnPlay').addEventListener('click',startPlayback);
 document.getElementById('btnStop').addEventListener('click',()=>{ stopPlayback(); autoSave(); });
 document.getElementById('btnMidi').addEventListener('click',exportMidi);
-document.getElementById('btnRecStart').addEventListener('click',startRecording);
-document.getElementById('btnRecStop').addEventListener('click',stopRecording);
 document.getElementById('btnSave').addEventListener('click',saveProjectFile);
 document.getElementById('btnLoad').addEventListener('click',()=>document.getElementById('loadFileInput').click());
 document.getElementById('loadFileInput').addEventListener('change',function(){
@@ -482,10 +480,10 @@ document.getElementById('btnMelGen').addEventListener('click',function(){
 });
 document.getElementById('btnMelGenRun').addEventListener('click',()=>{ pushHistory(); generateMelody(); });
 document.getElementById('seqStepCount').addEventListener('change',function(){ SEQ.steps=+this.value; buildSeqGrid(); if(S.isPlaying)buildSeqLoop(); });
-document.getElementById('seqSwing').addEventListener('input',function(){ document.getElementById('seqSwingVal').textContent=Math.round(this.value*100)+'%'; Tone.getTransport().swing=+this.value; });
+document.getElementById('seqSwing').addEventListener('input',function(){ document.getElementById('seqSwingVal').textContent=Math.round(this.value*100)+'%'; if(S.audioReady) Tone.getTransport().swing=+this.value; });
 document.getElementById('bpm').addEventListener('input',function(){
     document.getElementById('bpmVal').textContent=this.value;
-    Tone.getTransport().bpm.value=+this.value;
+    if(S.audioReady) Tone.getTransport().bpm.value=+this.value;
     if(S.isPlaying){ buildChordPart(); buildSeqLoop(); }
 });
 
@@ -712,8 +710,10 @@ buildSongBar();
 initArpUI();
 initMasterUI();
 initVizUI();
+initMixdownUI();
 document.getElementById('btnMixer').addEventListener('click', toggleMixer);
 document.getElementById('mixerClose').addEventListener('click', toggleMixer);
+document.getElementById('mixerPanel').addEventListener('click', e => { if (e.target === e.currentTarget) toggleMixer(); });
 document.getElementById('btnLauncher').addEventListener('click', () => toggleLauncher());
 loadProgression();
 loadScale();

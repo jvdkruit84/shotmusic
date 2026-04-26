@@ -20,7 +20,8 @@ const PAT_COLORS = {
 };
 
 const RULER_H  = 22;
-const CLIP_H   = 52;
+const CLIP_H   = 48;
+const AUDIO_H  = 44;
 const RESIZE_W = 10;
 
 // ── Open / close ──────────────────────────────────────────────
@@ -52,7 +53,7 @@ function resizeCanvas() {
     const bars = SEQ.arrangementBars || 32;
     const minW  = wrap.clientWidth || 600;
     canvas.width  = Math.max(minW, bars * ARR.zoom + 60);
-    canvas.height = RULER_H + CLIP_H + 4;
+    canvas.height = RULER_H + CLIP_H + AUDIO_H + 4;
 }
 
 // ── Pattern label buttons ─────────────────────────────────────
@@ -173,6 +174,25 @@ function renderArrangement() {
         }
     });
 
+    // Row separator between pattern clips and audio clips
+    const sepY = RULER_H + CLIP_H;
+    ctx.strokeStyle = '#1e1e36';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, sepY); ctx.lineTo(W, sepY); ctx.stroke();
+
+    // Audio row label strip
+    ctx.fillStyle = '#0c0c18';
+    ctx.fillRect(0, sepY, W, AUDIO_H);
+    ctx.font = 'bold 7px monospace';
+    ctx.fillStyle = '#ff6b6b88';
+    ctx.textAlign = 'left';
+    ctx.fillText('AUDIO', 4, sepY + 14);
+
+    // Audio clips
+    if (typeof renderAudioClipsRow === 'function') {
+        renderAudioClipsRow(ctx, W, sepY, AUDIO_H, ARR.scrollX, ARR.zoom);
+    }
+
     // Playhead
     const barPos = S.isPlaying && SEQ.songMode ? (SEQ.songPos || 0) : -1;
     if (barPos >= 0) {
@@ -183,7 +203,6 @@ function renderArrangement() {
             ctx.setLineDash([4, 3]);
             ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
             ctx.setLineDash([]);
-            // Triangle head on ruler
             ctx.fillStyle = '#ff9900';
             ctx.beginPath();
             ctx.moveTo(px - 6, 0); ctx.lineTo(px + 6, 0); ctx.lineTo(px, 9);
@@ -205,7 +224,18 @@ function roundRect(ctx, x, y, w, h, r) {
 
 // ── Hit testing ───────────────────────────────────────────────
 function hitTest(ex, ey) {
-    if (ey < RULER_H || !SEQ.arrangement) return null;
+    if (ey < RULER_H) return null;
+    // Audio row
+    if (ey >= RULER_H + CLIP_H) {
+        for (let i = (SEQ.audioClips || []).length - 1; i >= 0; i--) {
+            const clip = SEQ.audioClips[i];
+            const x = clip.startBar * ARR.zoom - ARR.scrollX;
+            const w = clip.lenBars  * ARR.zoom;
+            if (ex >= x && ex <= x + w) return { clip, isAudio: true, isResize: false };
+        }
+        return null;
+    }
+    if (!SEQ.arrangement) return null;
     for (let i = SEQ.arrangement.length - 1; i >= 0; i--) {
         const clip = SEQ.arrangement[i];
         const x = clip.startBar * ARR.zoom - ARR.scrollX;
@@ -234,6 +264,17 @@ function onDown(e) {
     const hit = hitTest(e.offsetX, e.offsetY);
     if (e.offsetY < RULER_H) return; // click on ruler — ignore
 
+    if (hit?.isAudio) {
+        // Audio clip: select + drag to move
+        AC.selectedId = hit.clip.id;
+        ARR.drag = {
+            type: 'audio-move', id: hit.clip.id,
+            startX: e.offsetX, origStart: hit.clip.startBar,
+        };
+        renderArrangement();
+        return;
+    }
+
     if (hit) {
         ARR.selectedId = hit.clip.id;
         ARR.drag = {
@@ -243,8 +284,8 @@ function onDown(e) {
             origStart: hit.clip.startBar,
             origLen:   hit.clip.lenBars,
         };
-    } else {
-        // Create new clip by drawing
+    } else if (e.offsetY < RULER_H + CLIP_H) {
+        // Create new pattern clip only in the pattern row
         const bar = canvasBar(e.offsetX);
         const maxBars = SEQ.arrangementBars || 32;
         if (bar < maxBars) {
@@ -267,13 +308,21 @@ function onMove(e) {
     if (!ARR.drag) {
         const hit = hitTest(ex, ey);
         canvas.style.cursor = ey < RULER_H ? 'default'
-            : hit ? (hit.isResize ? 'ew-resize' : 'grab') : 'crosshair';
+            : hit ? (hit.isResize ? 'ew-resize' : 'grab')
+            : ey >= RULER_H + CLIP_H ? 'default' : 'crosshair';
         return;
     }
 
-    const dx    = e.clientX - (canvas.getBoundingClientRect().left + ARR.drag.startX - ARR.scrollX) - ARR.drag.startX + ARR.scrollX;
-    const dxPx  = e.clientX - canvas.getBoundingClientRect().left - (ARR.drag.startX);
+    const dxPx  = e.clientX - canvas.getBoundingClientRect().left - ARR.drag.startX;
     const dBars = Math.round(dxPx / ARR.zoom);
+
+    if (ARR.drag.type === 'audio-move') {
+        const clip = (SEQ.audioClips || []).find(c => c.id === ARR.drag.id);
+        if (clip) clip.startBar = Math.max(0, ARR.drag.origStart + dBars);
+        renderArrangement();
+        return;
+    }
+
     const clip  = SEQ.arrangement?.find(c => c.id === ARR.drag.id);
     if (!clip) return;
 
@@ -287,7 +336,13 @@ function onMove(e) {
 
 function onUp() {
     if (ARR.drag) {
-        SEQ.arrangement?.sort((a, b) => a.startBar - b.startBar);
+        if (ARR.drag.type === 'audio-move') {
+            // Update DB with new position
+            const clip = (SEQ.audioClips || []).find(c => c.id === ARR.drag.id);
+            if (clip && typeof saveAudioClipPos === 'function') saveAudioClipPos(clip);
+        } else {
+            SEQ.arrangement?.sort((a, b) => a.startBar - b.startBar);
+        }
         autoSave();
     }
     ARR.drag = null;
@@ -298,7 +353,10 @@ function onUp() {
 function onRightClick(e) {
     e.preventDefault();
     const hit = hitTest(e.offsetX, e.offsetY);
-    if (hit) {
+    if (!hit) return;
+    if (hit.isAudio) {
+        if (typeof removeAudioClip === 'function') removeAudioClip(hit.clip.id);
+    } else {
         SEQ.arrangement = SEQ.arrangement.filter(c => c.id !== hit.clip.id);
         if (ARR.selectedId === hit.clip.id) ARR.selectedId = null;
         renderArrangement(); autoSave();
@@ -331,6 +389,9 @@ window.refreshArrangementPlayhead = function() {
 // ── Init listeners after DOM ready ────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btnArrangement')?.addEventListener('click', openArrangement);
+    document.getElementById('btnArrRec')?.addEventListener('click', function() {
+        if (typeof toggleAudioRecord === 'function') toggleAudioRecord(this);
+    });
 
     document.getElementById('arrBarsSelect')?.addEventListener('change', function() {
         SEQ.arrangementBars = +this.value;

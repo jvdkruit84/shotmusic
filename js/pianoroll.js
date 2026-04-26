@@ -19,18 +19,18 @@ const PR = {
     open: false,
     track: null,
     bars: 4,
-    zoom: 1.0,        // horizontal zoom multiplier
-    scrollX: 0,       // beat offset (left edge)
-    scrollY: 0,       // px offset from top (pitch scroll)
-    snap: 0.25,       // snap in beats (0.25 = 16th, 0.5 = 8th, 1 = quarter)
+    zoom: 1.0,
+    scrollX: 0,
+    scrollY: 0,
+    snap: 0.25,
     selected: new Set(),
     nextId: 1,
-    // Interaction
-    iMode: 'draw',    // 'draw' | 'select'
-    drag: null,       // { type:'move'|'resize'|'vel', id, startBeat, startNote, origStart, origNote, origDur }
+    iMode: 'draw',
+    drag: null,
     genVisible: false,
+    velVisible: false,
     genPanel: null,
-    // Elements
+    velPanel: null,
     modal: null,
     canvas: null,
     velCanvas: null,
@@ -38,6 +38,9 @@ const PR = {
     velCtx: null,
     raf: null,
     dirty: true,
+    // ── MIDI recording ──
+    recording: false,
+    recPending: new Map(), // midiNote → {startBeat, vel}
 };
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -97,6 +100,62 @@ function buildPianoRollPart(track) {
 }
 window.buildPianoRollPart = buildPianoRollPart;
 
+// ── MIDI note handler (called from midi_learn.js) ────────────
+function _midiNoteIn(note, vel, isOn) {
+    if (!PR.recording || !PR.track) return;
+
+    // Always play through the track synth for live monitoring
+    try {
+        if (isOn) {
+            PR.track.synth?.triggerAttack?.(midiFreq(note), Tone.now(), vel / 127);
+        } else {
+            PR.track.synth?.triggerRelease?.(midiFreq(note), Tone.now());
+        }
+    } catch(e) {}
+
+    // Only record timing when transport is playing
+    if (!S?.isPlaying) {
+        if (isOn) PR.recPending.set(note, { startBeat: 0, vel });
+        else PR.recPending.delete(note);
+        return;
+    }
+
+    const loopBeats = PR.bars * 4;
+    const rawBeat   = Tone.getTransport().ticks / Tone.getTransport().PPQ;
+    const curBeat   = rawBeat % loopBeats;
+
+    if (isOn) {
+        PR.recPending.set(note, { startBeat: curBeat, vel });
+        PR.dirty = true;
+    } else {
+        const pending = PR.recPending.get(note);
+        if (!pending) return;
+        PR.recPending.delete(note);
+
+        let dur = curBeat - pending.startBeat;
+        if (dur <= 0) dur += loopBeats;          // wrapped around loop end
+        dur = Math.max(PR.snap || 0.25, dur);
+
+        // Snap start to grid
+        const start = PR.snap > 0
+            ? Math.round(pending.startBeat / PR.snap) * PR.snap
+            : pending.startBeat;
+
+        PR.track.pianoRoll = PR.track.pianoRoll || [];
+        PR.track.pianoRoll.push({
+            id:    PR.nextId++,
+            note:  Math.max(NOTE_LO, Math.min(NOTE_HI, note)),
+            start: Math.max(0, start % loopBeats),
+            dur:   Math.min(dur, loopBeats),
+            vel,
+        });
+
+        PR.dirty = true;
+        if (S?.isPlaying) buildPianoRollPart(PR.track);
+        if (typeof autoSave === 'function') autoSave();
+    }
+}
+
 // ── Import from step grid ─────────────────────────────────────
 function importFromSteps(track) {
     if (!track.steps) return;
@@ -146,6 +205,12 @@ function openPianoRoll(track) {
 window.openPianoRoll = openPianoRoll;
 
 function closePianoRoll() {
+    // Stop recording when closing
+    if (PR.recording) {
+        PR.recording = false;
+        window.MIDI_NOTE_HANDLER = null;
+        PR.recPending.clear();
+    }
     if (PR.modal) PR.modal.style.display = 'none';
     PR.open  = false;
     PR.track = null;
@@ -244,13 +309,70 @@ function buildModal() {
     genBtn.title = 'Noten genereren op basis van toonladder & progressie';
     genBtn.addEventListener('click', toggleGenPanel);
 
+    // ── Separator ──
+    const sep1 = document.createElement('div');
+    sep1.className = 'pr-sep';
+
+    // Quantize button
+    const quantBtn = document.createElement('button');
+    quantBtn.className = 'pr-tool-btn';
+    quantBtn.textContent = 'Q';
+    quantBtn.title = 'Quantize: snap geselecteerde noten op het grid (sneltoets Q)';
+    quantBtn.addEventListener('click', quantizeSelected);
+
+    // Velocity curves panel toggle
+    const velBtn = document.createElement('button');
+    velBtn.className = 'pr-tool-btn';
+    velBtn.id = 'prVelBtn';
+    velBtn.textContent = 'Vel ▾';
+    velBtn.title = 'Velocity curves: crescendo, flatten, humanize';
+    velBtn.addEventListener('click', toggleVelPanel);
+
+    // Chord tools
+    const sep2 = document.createElement('div');
+    sep2.className = 'pr-sep';
+
+    const chordLabel = document.createElement('span');
+    chordLabel.className = 'pr-label';
+    chordLabel.textContent = '+';
+
+    // Build chord buttons separately so we can append them in order
+    const chord3  = makeChordBtn('3rd', 4,  '+terts (+4 st)');
+    const chord5  = makeChordBtn('5th', 7,  '+kwint (+7 st)');
+    const chord8  = makeChordBtn('8va', 12, '+octaaf (+12 st)');
+
+    // ── Record button ─────────────────────────────────────────
+    const recSep = document.createElement('div'); recSep.className = 'pr-sep';
+    const recBtn = document.createElement('button');
+    recBtn.className = 'pr-rec-btn';
+    recBtn.title = 'MIDI opnemen — speel noten op een MIDI-keyboard. Start de sequencer om timing vast te leggen.';
+    recBtn.textContent = '● REC';
+    recBtn.addEventListener('click', () => {
+        PR.recording = !PR.recording;
+        recBtn.classList.toggle('active', PR.recording);
+        if (PR.recording) {
+            PR.recPending.clear();
+            window.MIDI_NOTE_HANDLER = _midiNoteIn;
+            if (typeof setStatus === 'function') setStatus('MIDI opname actief — speel noten, start Play voor timing', 'ok');
+        } else {
+            window.MIDI_NOTE_HANDLER = null;
+            PR.recPending.forEach((_, note) => {
+                PR.track?.synth?.triggerRelease?.(midiFreq(note), Tone.now());
+            });
+            PR.recPending.clear();
+            if (typeof setStatus === 'function') setStatus('Opname gestopt', 'ok');
+        }
+        PR.dirty = true;
+    });
+
     // Close
     const closeBtn = document.createElement('button');
     closeBtn.className = 'pr-close-btn';
     closeBtn.textContent = '×';
     closeBtn.addEventListener('click', closePianoRoll);
 
-    header.append(title, modeBtn, barsLabel, barsGroup, snapLabel, snapSel, zoomLabel, zoomOut, zoomIn, genBtn, closeBtn);
+    header.append(title, modeBtn, barsLabel, barsGroup, snapLabel, snapSel, zoomLabel, zoomOut, zoomIn, genBtn,
+                  sep1, quantBtn, velBtn, sep2, chordLabel, chord3, chord5, chord8, recSep, recBtn, closeBtn);
 
     // Canvas area
     const canvasWrap = document.createElement('div');
@@ -287,7 +409,11 @@ function buildModal() {
     PR.genPanel = buildGenPanel();
     PR.genPanel.style.display = 'none';
 
-    dialog.append(header, PR.genPanel, canvasWrap, velWrap, hScroll);
+    // Velocity/tools panel
+    PR.velPanel = buildVelPanel();
+    PR.velPanel.style.display = 'none';
+
+    dialog.append(header, PR.genPanel, PR.velPanel, canvasWrap, velWrap, hScroll);
     backdrop.appendChild(dialog);
     document.body.appendChild(backdrop);
     PR.modal = backdrop;
@@ -469,11 +595,45 @@ function render() {
             const playBeat = ((bar % totalBarsInLoop) * 4) + (beat ?? 0);
             const px = beatToX(playBeat);
             if (px >= KEYS_W && px <= W) {
-                ctx.strokeStyle = '#f59f00';
-                ctx.lineWidth   = 2;
+                ctx.strokeStyle = PR.recording ? '#ef4444' : '#f59f00';
+                ctx.lineWidth   = PR.recording ? 3 : 2;
                 ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
             }
         } catch(e) {}
+    }
+
+    // ── Recording overlay ──────────────────────────────────────
+    if (PR.recording) {
+        // Red tint over note area
+        ctx.fillStyle = 'rgba(239,68,68,0.05)';
+        ctx.fillRect(KEYS_W, RULER_H, W - KEYS_W, H - RULER_H);
+
+        // Draw currently-held (pending) notes in red
+        const loopBeats = PR.bars * 4;
+        const rawBeat   = S?.isPlaying ? Tone.getTransport().ticks / Tone.getTransport().PPQ : 0;
+        const curBeat   = rawBeat % loopBeats;
+        PR.recPending.forEach((info, midiNote) => {
+            if (midiNote < NOTE_LO || midiNote > NOTE_HI) return;
+            let dur = S?.isPlaying ? (curBeat - info.startBeat) : 0.25;
+            if (dur < 0) dur += loopBeats;
+            dur = Math.max(0.125, dur);
+            const x  = beatToX(info.startBeat);
+            const y  = noteToY(midiNote);
+            const nw = Math.max(6, dur * bw);
+            ctx.globalAlpha = 0.75;
+            ctx.fillStyle   = '#ef4444';
+            ctx.fillRect(x, y + 1, nw, NOTE_H - 2);
+            ctx.globalAlpha = 1;
+        });
+
+        // REC badge in ruler
+        const blink = Math.floor(Date.now() / 500) % 2 === 0;
+        if (blink) {
+            ctx.fillStyle = '#ef4444';
+            ctx.font = 'bold 10px monospace';
+            ctx.fillText('● REC', KEYS_W + 6, RULER_H - 6);
+        }
+        PR.dirty = true; // keep animating while recording
     }
 
     // ── Piano keyboard ────────────────────────────────────────
@@ -753,21 +913,233 @@ function onWindowMouseUp()    { onCanvasMouseUp(); onVelMouseUp(); }
 function onKeyDown(e) {
     if (!PR.open) return;
     if (e.key === 'Escape') { closePianoRoll(); return; }
+
     if (e.key === 'Delete' || e.key === 'Backspace') {
         if (!PR.track || !PR.selected.size) return;
         PR.track.pianoRoll = PR.track.pianoRoll.filter(n => !PR.selected.has(n.id));
         PR.selected.clear();
-        if (S?.isPlaying && PR.track.editMode === 'pianoroll') buildPianoRollPart(PR.track);
-        if (typeof autoSave === 'function') autoSave();
-        PR.dirty = true;
+        rebuildAndSave();
         e.preventDefault();
+        return;
     }
+
     if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
         PR.selected.clear();
         PR.track?.pianoRoll.forEach(n => PR.selected.add(n.id));
         PR.dirty = true;
         e.preventDefault();
+        return;
     }
+
+    // Transpose: ↑↓ = ±1 semitone, Ctrl+↑↓ = ±12 (octave)
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && PR.selected.size) {
+        e.preventDefault();
+        const delta = (e.ctrlKey || e.metaKey)
+            ? (e.key === 'ArrowUp' ? 12 : -12)
+            : (e.key === 'ArrowUp' ? 1  : -1);
+        PR.track?.pianoRoll.forEach(n => {
+            if (PR.selected.has(n.id))
+                n.note = Math.max(NOTE_LO, Math.min(NOTE_HI, n.note + delta));
+        });
+        rebuildAndSave();
+        return;
+    }
+
+    // Q = quantize
+    if (e.key === 'q' || e.key === 'Q') {
+        if (!e.ctrlKey && !e.metaKey) { quantizeSelected(); e.preventDefault(); }
+        return;
+    }
+
+    // Ctrl+D = duplicate selected
+    if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault();
+        duplicateSelected();
+        return;
+    }
+}
+
+// ── Shared helper ─────────────────────────────────────────────
+function rebuildAndSave() {
+    if (S?.isPlaying && PR.track?.editMode === 'pianoroll') buildPianoRollPart(PR.track);
+    if (typeof autoSave === 'function') autoSave();
+    PR.dirty = true;
+}
+
+function selectedNotes() {
+    const notes = PR.track?.pianoRoll ?? [];
+    return PR.selected.size > 0 ? notes.filter(n => PR.selected.has(n.id)) : [...notes];
+}
+
+// ── Chord button factory ──────────────────────────────────────
+function makeChordBtn(label, semitones, title) {
+    const b = document.createElement('button');
+    b.className = 'pr-tool-btn';
+    b.textContent = label;
+    b.title = title;
+    b.addEventListener('click', () => addInterval(semitones));
+    return b;
+}
+
+// ── Quantize ──────────────────────────────────────────────────
+function quantizeSelected() {
+    if (!PR.track) return;
+    const s = PR.snap > 0 ? PR.snap : 0.25;
+    selectedNotes().forEach(n => {
+        n.start = Math.round(n.start / s) * s;
+    });
+    rebuildAndSave();
+    if (typeof setStatus === 'function') setStatus('Quantize toegepast ✓', 'ok');
+}
+
+// ── Duplicate selected ────────────────────────────────────────
+function duplicateSelected() {
+    if (!PR.track || !PR.selected.size) return;
+    const sel = PR.track.pianoRoll.filter(n => PR.selected.has(n.id));
+    if (!sel.length) return;
+    // Shift copies by the span of the selection
+    const maxEnd = Math.max(...sel.map(n => n.start + n.dur));
+    const minStart = Math.min(...sel.map(n => n.start));
+    const shift = maxEnd - minStart;
+    PR.selected.clear();
+    const copies = sel.map(n => {
+        const copy = { ...n, id: PR.nextId++, start: n.start + shift };
+        PR.selected.add(copy.id);
+        return copy;
+    });
+    PR.track.pianoRoll.push(...copies);
+    rebuildAndSave();
+}
+
+// ── Add interval (chord tools) ────────────────────────────────
+function addInterval(semitones) {
+    if (!PR.track) return;
+    const targets = selectedNotes();
+    if (!targets.length) { if (typeof setStatus === 'function') setStatus('Selecteer eerst noten', 'err'); return; }
+    PR.selected.clear();
+    const copies = targets.map(n => {
+        const copy = { ...n, id: PR.nextId++, note: Math.max(NOTE_LO, Math.min(NOTE_HI, n.note + semitones)) };
+        PR.selected.add(copy.id);
+        return copy;
+    });
+    PR.track.pianoRoll.push(...copies);
+    rebuildAndSave();
+}
+
+// ── Velocity panel ────────────────────────────────────────────
+function toggleVelPanel() {
+    if (!PR.velPanel) return;
+    PR.velVisible = !PR.velVisible;
+    PR.velPanel.style.display = PR.velVisible ? 'flex' : 'none';
+    document.getElementById('prVelBtn')?.classList.toggle('active', PR.velVisible);
+    // Close gen panel if open
+    if (PR.velVisible && PR.genVisible) {
+        PR.genVisible = false;
+        if (PR.genPanel) PR.genPanel.style.display = 'none';
+        document.getElementById('prGenBtn')?.classList.remove('active');
+    }
+}
+
+function buildVelPanel() {
+    const panel = document.createElement('div');
+    panel.className = 'pr-gen-panel pr-vel-panel';
+    panel.id = 'prVelPanel';
+
+    function btn(label, title, fn) {
+        const b = document.createElement('button');
+        b.className = 'pr-vel-btn';
+        b.textContent = label;
+        b.title = title;
+        b.addEventListener('click', fn);
+        return b;
+    }
+
+    // ── Flatten row ──
+    const flatRow = document.createElement('div');
+    flatRow.className = 'pr-vel-row';
+    const flatLabel = document.createElement('span');
+    flatLabel.className = 'pr-gen-label';
+    flatLabel.textContent = 'Flatten';
+    const flatInput = document.createElement('input');
+    flatInput.type = 'number'; flatInput.min = 1; flatInput.max = 127; flatInput.value = 90;
+    flatInput.className = 'pr-vel-num';
+    flatInput.title = 'Doelvelocity (1–127)';
+    const flatBtn = btn('Set', 'Zet alle (geselecteerde) noten op deze velocity', () => {
+        const v = Math.max(1, Math.min(127, +flatInput.value || 90));
+        selectedNotes().forEach(n => { n.vel = v; });
+        rebuildAndSave();
+    });
+    flatRow.append(flatLabel, flatInput, flatBtn);
+
+    // ── Curve row ──
+    const curveRow = document.createElement('div');
+    curveRow.className = 'pr-vel-row';
+    const curveLabel = document.createElement('span');
+    curveLabel.className = 'pr-gen-label';
+    curveLabel.textContent = 'Curve';
+
+    const fromInput = document.createElement('input');
+    fromInput.type = 'number'; fromInput.min = 1; fromInput.max = 127; fromInput.value = 40;
+    fromInput.className = 'pr-vel-num'; fromInput.title = 'Start velocity';
+    const arrow = document.createElement('span');
+    arrow.textContent = '→'; arrow.style.color = 'var(--text2)';
+    const toInput = document.createElement('input');
+    toInput.type = 'number'; toInput.min = 1; toInput.max = 127; toInput.value = 110;
+    toInput.className = 'pr-vel-num'; toInput.title = 'Eind velocity';
+
+    const crescBtn  = btn('↗ Cresc',  'Lineaire crescendo over geselecteerde noten',     () => applyVelRamp(+fromInput.value, +toInput.value));
+    const decrescBtn = btn('↘ Decresc','Lineaire decrescendo over geselecteerde noten',    () => applyVelRamp(+toInput.value, +fromInput.value));
+    curveRow.append(curveLabel, fromInput, arrow, toInput, crescBtn, decrescBtn);
+
+    // ── Humanize row ──
+    const humRow = document.createElement('div');
+    humRow.className = 'pr-vel-row';
+    const humLabel = document.createElement('span');
+    humLabel.className = 'pr-gen-label';
+    humLabel.textContent = 'Humanize';
+    const humInput = document.createElement('input');
+    humInput.type = 'number'; humInput.min = 1; humInput.max = 40; humInput.value = 15;
+    humInput.className = 'pr-vel-num'; humInput.title = 'Max afwijking (±)';
+    const humBtn = btn('~ Toepassen', 'Willekeurige velocity variatie toevoegen', () => {
+        const range = Math.max(1, Math.min(40, +humInput.value || 15));
+        selectedNotes().forEach(n => {
+            n.vel = Math.max(1, Math.min(127, n.vel + Math.round((Math.random() * 2 - 1) * range)));
+        });
+        rebuildAndSave();
+    });
+    humRow.append(humLabel, humInput, humBtn);
+
+    // ── Timing humanize ──
+    const timeRow = document.createElement('div');
+    timeRow.className = 'pr-vel-row';
+    const timeLabel = document.createElement('span');
+    timeLabel.className = 'pr-gen-label';
+    timeLabel.textContent = 'Timing ±';
+    const timeInput = document.createElement('input');
+    timeInput.type = 'number'; timeInput.min = 0; timeInput.max = 0.1; timeInput.step = 0.005; timeInput.value = 0.02;
+    timeInput.className = 'pr-vel-num'; timeInput.title = 'Max timing afwijking in beats';
+    const timeBtn = btn('Humanize', 'Kleine willekeurige timing variatie (maakt het menselijker)', () => {
+        const range = Math.max(0, Math.min(0.2, +timeInput.value || 0.02));
+        selectedNotes().forEach(n => {
+            n.start = Math.max(0, n.start + (Math.random() * 2 - 1) * range);
+        });
+        rebuildAndSave();
+    });
+    timeRow.append(timeLabel, timeInput, timeBtn);
+
+    panel.append(flatRow, curveRow, humRow, timeRow);
+    return panel;
+}
+
+function applyVelRamp(fromVel, toVel) {
+    const notes = selectedNotes().slice().sort((a, b) => a.start - b.start);
+    if (!notes.length) return;
+    const n = notes.length;
+    notes.forEach((note, i) => {
+        const t = n === 1 ? 0 : i / (n - 1);
+        note.vel = Math.max(1, Math.min(127, Math.round(fromVel + t * (toVel - fromVel))));
+    });
+    rebuildAndSave();
 }
 
 // ── Generator panel ──────────────────────────────────────────
@@ -855,8 +1227,13 @@ function toggleGenPanel() {
     if (!PR.genPanel) return;
     PR.genVisible = !PR.genVisible;
     PR.genPanel.style.display = PR.genVisible ? 'flex' : 'none';
-    const btn = document.getElementById('prGenBtn');
-    if (btn) btn.classList.toggle('active', PR.genVisible);
+    document.getElementById('prGenBtn')?.classList.toggle('active', PR.genVisible);
+    // Close vel panel if open
+    if (PR.genVisible && PR.velVisible) {
+        PR.velVisible = false;
+        if (PR.velPanel) PR.velPanel.style.display = 'none';
+        document.getElementById('prVelBtn')?.classList.remove('active');
+    }
 }
 
 function runGenerator() {

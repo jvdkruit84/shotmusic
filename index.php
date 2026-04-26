@@ -255,8 +255,7 @@
                     <button class="menu-btn" id="btnMidi">↓ MIDI Export</button>
                     <button class="menu-btn" id="btnMidiOut">⊙ VST / MIDI Out</button>
                     <div class="menu-sep"></div>
-                    <button class="menu-btn menu-btn-rec" id="btnRecStart">● Opnemen</button>
-                    <button class="menu-btn" id="btnRecStop" disabled>■ Stop opname</button>
+                    <button class="menu-btn menu-btn-rec" id="btnMixdown">⬇ Mixdown / Export</button>
                 </div>
             </div>
 
@@ -280,6 +279,109 @@
             <button class="viz-close" id="vizClose">×</button>
         </div>
         <canvas id="vizCanvas" class="viz-canvas"></canvas>
+    </div>
+
+    <!-- Mixdown Modal -->
+    <div class="modal-overlay" id="mixdownModal">
+        <div class="modal-box mixdown-modal">
+            <div class="modal-header">
+                <span>🎯 Mixdown &amp; Export</span>
+                <button class="modal-close" id="mixdownClose">×</button>
+            </div>
+            <div class="mixdown-body">
+
+                <!-- Volledige mix -->
+                <div class="mxd-section">
+                    <div class="mxd-section-title">Volledige mix</div>
+                    <div class="mxd-row">
+                        <label>Bars</label>
+                        <div class="mxd-bar-btns">
+                            <button class="mxd-bar-btn active" data-bars="4">4</button>
+                            <button class="mxd-bar-btn" data-bars="8">8</button>
+                            <button class="mxd-bar-btn" data-bars="16">16</button>
+                            <button class="mxd-bar-btn" data-bars="32">32</button>
+                            <input type="number" id="mixdownBarsCustom" min="1" max="128" placeholder="…" title="Aangepast aantal bars">
+                        </div>
+                    </div>
+                    <div class="mxd-row">
+                        <label>Formaat</label>
+                        <span class="mxd-format-badge">WebM audio</span>
+                        <span class="mxd-format-hint">(open in Audacity voor WAV)</span>
+                    </div>
+                    <div class="mxd-progress-wrap hidden" id="mixdownProgress">
+                        <div class="mxd-progress-bar"><div class="mxd-progress-fill" id="mixdownFill"></div></div>
+                        <span class="mxd-progress-label" id="mixdownProgressLabel">Bezig…</span>
+                    </div>
+                    <div class="mxd-actions">
+                        <button class="mxd-btn-primary" id="btnMixdownStart">▶ Start Mixdown</button>
+                        <button class="mxd-btn-danger hidden" id="btnMixdownAbort">■ Afbreken</button>
+                    </div>
+                </div>
+
+                <div class="mxd-divider"></div>
+
+                <!-- Stem export -->
+                <div class="mxd-section">
+                    <div class="mxd-section-title">Stem export <span class="mxd-section-sub">(één bestand per track)</span></div>
+                    <div class="mxd-row">
+                        <label>Bars per stem</label>
+                        <input type="number" id="stemBars" min="1" max="64" value="8" class="mxd-num-input">
+                    </div>
+                    <div class="mxd-progress-wrap hidden" id="stemProgress">
+                        <div class="mxd-progress-bar"><div class="mxd-progress-fill" id="stemFill"></div></div>
+                        <span class="mxd-progress-label" id="stemProgressLabel">Bezig…</span>
+                    </div>
+                    <div class="mxd-actions">
+                        <button class="mxd-btn-secondary" id="btnStemExport">⊞ Start Stem Export</button>
+                    </div>
+                </div>
+
+                <div class="mxd-divider"></div>
+
+                <!-- Handmatig opnemen -->
+                <div class="mxd-section">
+                    <div class="mxd-section-title">Handmatig opnemen <span class="mxd-section-sub">(vrije duur)</span></div>
+                    <div class="mxd-actions">
+                        <button class="mxd-btn-rec" id="btnRecStart">● Start opname</button>
+                        <button class="mxd-btn-secondary" id="btnRecStop" disabled>■ Stop &amp; download</button>
+                    </div>
+                </div>
+
+                <div class="mxd-divider"></div>
+
+                <!-- Audio Input Recording -->
+                <div class="mxd-section">
+                    <div class="mxd-section-title">Audio Input <span class="mxd-section-sub">(microfoon / line-in)</span></div>
+                    <div class="mxd-row">
+                        <label>Apparaat</label>
+                        <select id="audioInputDevice" class="mxd-device-sel">
+                            <option value="">— klik Toestemming —</option>
+                        </select>
+                        <button class="mxd-btn-secondary mxd-btn-sm" id="btnAudioInputPerm" title="Microfoon toestemming vragen">Toestemming</button>
+                    </div>
+                    <div class="mxd-row">
+                        <label>Niveau</label>
+                        <canvas id="audioInputMeter" width="200" height="10" class="mxd-meter-canvas"></canvas>
+                        <span id="audioInputStatus" class="mxd-input-status">Inactief</span>
+                    </div>
+                    <div class="mxd-row">
+                        <label>Monitor</label>
+                        <button class="mxd-btn-secondary mxd-btn-sm" id="btnAudioInputMonitor" title="Hoor jezelf door de luidsprekers — pas op voor feedback!">Uit</button>
+                        <span class="mxd-warn">⚠ feedback bij ingebouwde mic</span>
+                    </div>
+                    <div class="mxd-row">
+                        <label>Monitor vol</label>
+                        <input type="range" id="audioInputMonGain" min="0" max="1" step="0.05" value="0.7" style="width:80px">
+                        <span id="audioInputMonGainVal" class="mxd-gain-val">70%</span>
+                    </div>
+                    <div class="mxd-actions">
+                        <button class="mxd-btn-rec" id="btnAudioInputStart">● Opname starten</button>
+                        <button class="mxd-btn-secondary" id="btnAudioInputStop" disabled>■ Stop &amp; download</button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
     </div>
 
     <!-- Chord progression -->
@@ -326,7 +428,26 @@
                     <span id="arpGateVal">50%</span>
                 </label>
             </div>
+            <!-- Extract to melody button, right-aligned in header -->
+            <button class="seq-ctrl-btn chord-extract-btn" id="btnChordExtract" title="Schrijf akkoordnoten naar een melodie-track">→ Melodie</button>
         </div>
+
+        <!-- Extract panel (shown/hidden by btnChordExtract) -->
+        <div class="chord-extract-panel hidden" id="chordExtractPanel">
+            <label class="chord-ex-lbl">Track
+                <select id="chordExTrack"></select>
+            </label>
+            <label class="chord-ex-lbl">Noot
+                <select id="chordExNote">
+                    <option value="bass">Bas (laagste)</option>
+                    <option value="mid" selected>Midden</option>
+                    <option value="top">Hoog (hoogste)</option>
+                    <option value="root2">Root +1 oct</option>
+                </select>
+            </label>
+            <button class="seq-ctrl-btn chord-ex-go" id="btnChordExGo">✓ Schrijven</button>
+        </div>
+
         <div class="chord-grid" id="chordGrid"><span style="color:var(--muted);font-size:12px">Laden…</span></div>
     </div>
 
@@ -564,24 +685,31 @@
             </label>
             <button class="arr-zoom-btn" id="btnArrZoomOut" title="Zoom uit">−</button>
             <button class="arr-zoom-btn" id="btnArrZoomIn" title="Zoom in">+</button>
-            <span class="arr-hint">Klik = nieuw clip &nbsp;·&nbsp; Drag = verplaats &nbsp;·&nbsp; Drag rechts = resize &nbsp;·&nbsp; Rechts-klik = verwijder &nbsp;·&nbsp; Ctrl+Scroll = zoom</span>
+            <span class="arr-hint">Klik = nieuw clip &nbsp;·&nbsp; Drag = verplaats &nbsp;·&nbsp; Drag rechts = resize &nbsp;·&nbsp; Rechts-klik = verwijder &nbsp;·&nbsp; Ctrl+Scroll = zoom &nbsp;·&nbsp; REC = audio opnemen</span>
             <button class="arr-zoom-btn" style="margin-left:auto" onclick="openArrangement()">×</button>
         </div>
         <div class="arr-body">
-            <div class="arr-pat-labels" id="arrPatLabels"></div>
+            <div class="arr-sidebar">
+                <div class="arr-pat-labels" id="arrPatLabels"></div>
+                <div class="arr-audio-sidebar">
+                    <button class="arr-rec-btn" id="btnArrRec" title="Opname starten / stoppen">&#9679; REC</button>
+                </div>
+            </div>
             <div class="arr-canvas-wrap" id="arrCanvasWrap">
                 <canvas id="arrCanvas"></canvas>
             </div>
         </div>
     </div>
 
-    <!-- Mixer panel -->
-    <div class="mixer-panel" id="mixerPanel">
-        <div class="mixer-header">
-            <span class="mixer-title">MIXER</span>
-            <button class="mixer-close" id="mixerClose" title="Sluiten">×</button>
+    <!-- Mixer modal -->
+    <div class="modal-overlay" id="mixerPanel">
+        <div class="modal-box mixer-modal">
+            <div class="modal-header">
+                <span>⊞ MIXER</span>
+                <button class="modal-close" id="mixerClose">×</button>
+            </div>
+            <div class="mixer-strips" id="mixerStrips"></div>
         </div>
-        <div class="mixer-strips" id="mixerStrips"></div>
     </div>
 
 </div>
@@ -766,14 +894,34 @@
       <div class="sb-sidebar" id="sbSidebar"></div>
       <div class="sb-files-pane" id="sbFiles"></div>
     </div>
+    <!-- Waveform viewer / trimmer -->
+    <div class="sb-wf-panel hidden" id="sbWfPanel">
+      <div class="sb-wf-header">
+        <span id="sbWfFilename" class="sb-wf-filename"></span>
+        <span id="sbWfDuration" class="sb-wf-duration"></span>
+        <span class="sb-wf-hint">Sleep de gele/rode handles om te trimmen</span>
+        <button class="sb-wf-close" id="sbWfClose" title="Sluit waveform">×</button>
+      </div>
+      <div class="sb-wf-wrap">
+        <canvas id="sbWfCanvas" height="72"></canvas>
+      </div>
+      <div class="sb-wf-controls">
+        <span class="sb-wf-label">▶ <span id="sbWfStartVal">0.00s</span></span>
+        <span class="sb-wf-label sb-wf-label-end">⏹ <span id="sbWfEndVal">—</span></span>
+        <button class="sb-wf-btn" id="sbWfPreviewBtn">▶ Preview trim</button>
+        <button class="sb-wf-btn sb-wf-btn-apply" id="sbWfApplyBtn">✓ Gebruik trim</button>
+        <button class="sb-wf-btn sb-wf-btn-reset" id="sbWfResetBtn">↺ Reset</button>
+        <span class="sb-wf-sel-dur" id="sbWfSelDur"></span>
+      </div>
+    </div>
   </div>
 </div>
 
 <script src="js/state.js"></script>
 <script src="js/presets.js"></script>
-<script src="js/synth.js?v=5"></script>
-<script src="js/sequencer.js"></script>
-<script src="js/arp.js"></script>
+<script src="js/synth.js?v=6"></script>
+<script src="js/sequencer.js?v=2"></script>
+<script src="js/arp.js?v=2"></script>
 <script src="js/mixer.js"></script>
 <script src="js/master.js"></script>
 <script src="js/visualizer.js"></script>
@@ -781,13 +929,14 @@
 <script src="js/melody.js"></script>
 <script src="js/project.js"></script>
 <script src="js/history.js"></script>
-<script src="js/app.js"></script>
+<script src="js/app.js?v=2"></script>
 <script src="js/templates.js"></script>
 <script src="js/pianoroll.js"></script>
 <script src="js/launcher.js"></script>
 <script src="js/buses.js"></script>
 <script src="js/arrangement.js"></script>
-<script src="js/automation.js"></script>
+<script src="js/audio_clips.js"></script>
+<script src="js/automation.js?v=2"></script>
 <script src="js/midi_learn.js"></script>
 <script src="js/midi_import.js"></script>
 <script src="js/midi_out.js"></script>

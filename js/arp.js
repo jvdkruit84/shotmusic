@@ -17,6 +17,10 @@ function buildArpLoop() {
     let idx = 0;
     let dir = 1; // for updown mode
 
+    // Pre-compute outside the callback — Tone.Time() inside a scheduled
+    // callback triggers Tone.js's "accurate timing" warning (Debug.ts:95).
+    const rateSec = Tone.Time(ARP.rate).toSeconds();
+
     arpLoop = new Tone.Sequence((time) => {
         if (S.chordMute) return;
         const notes = getArpNotes();
@@ -40,7 +44,6 @@ function buildArpLoop() {
             note = notes[Math.floor(Math.random() * len)];
         }
 
-        const rateSec = Tone.Time(ARP.rate).toSeconds();
         const dur = Math.max(0.02, rateSec * ARP.gate);
         chordSynth?.triggerAttackRelease(midiFreq(note), dur, time);
 

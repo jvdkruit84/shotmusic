@@ -43,6 +43,13 @@ function onMidiIn(event) {
     const type    = status & 0xf0;
     const channel = status & 0x0f;
 
+    // Note On / Off → forward to piano roll recorder (if active)
+    if (type === 0x90 || type === 0x80) {
+        const isOn = type === 0x90 && data2 > 0;
+        if (typeof window.MIDI_NOTE_HANDLER === 'function') window.MIDI_NOTE_HANDLER(data1, data2, isOn);
+        return;
+    }
+
     if (type !== 0xb0) return; // CC only
     const cc  = data1;
     const val = data2 / 127; // 0-1
